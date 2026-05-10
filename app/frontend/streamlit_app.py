@@ -354,7 +354,10 @@ if run:
                     selected_output_language,
                     demo_mode,
                 )
-                st.success("Session generated and saved.")
+                if st.session_state["active_session"].get("demo_mode"):
+                    st.success("Demo preview generated. It was not saved to session history.")
+                else:
+                    st.success("Session generated and saved.")
             except requests.HTTPError as exc:
                 message, action = friendly_api_error(exc)
                 st.error(message)

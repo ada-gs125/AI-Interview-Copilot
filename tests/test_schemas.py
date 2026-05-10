@@ -1,4 +1,4 @@
-from app.schemas import GenerateQuestionsRequest, JDAnalysis, SkillItem
+from app.schemas import GenerateQuestionsRequest, JDAnalysis, ResumeMatchRequest, SkillItem
 from app.services.mock_service import MockAIInterviewService
 
 
@@ -43,3 +43,46 @@ def test_mock_service_generates_demo_question_set():
 
     assert questions.technical_questions
     assert questions.behavioral_questions
+
+
+def test_demo_preview_session_can_use_unsaved_id():
+    from app.schemas import AnswerSet, SessionResponse
+
+    service = MockAIInterviewService()
+    jd = service.analyze_jd(
+        "We need a backend AI engineer with Python, APIs, LLM workflows, persistence, and system design experience.",
+        "AI Engineer",
+    )
+    match = service.match_resume(
+        ResumeMatchRequest(
+            resume_text="Python FastAPI backend engineer with APIs, SQL, and AI workflow project experience.",
+            job_description="We need a backend AI engineer with Python, APIs, LLM workflows, persistence, and system design experience.",
+            role_type="AI Engineer",
+            demo_mode=True,
+        )
+    )
+    questions = service.generate_questions(
+        GenerateQuestionsRequest(
+            resume_text="Python FastAPI backend engineer with APIs, SQL, and AI workflow project experience.",
+            job_description="We need a backend AI engineer with Python, APIs, LLM workflows, persistence, and system design experience.",
+            role_type="AI Engineer",
+            demo_mode=True,
+        )
+    )
+
+    session = SessionResponse(
+        id=0,
+        created_at="2026-05-10T00:00:00+00:00",
+        role_type="AI Engineer",
+        output_language="English",
+        demo_mode=True,
+        job_description="We need a backend AI engineer with Python, APIs, LLM workflows, persistence, and system design experience.",
+        resume_text="Python FastAPI backend engineer with APIs, SQL, and AI workflow project experience.",
+        jd_analysis=jd,
+        resume_match=match,
+        questions=questions,
+        answers=AnswerSet(answers=[]),
+    )
+
+    assert session.id == 0
+    assert session.demo_mode is True

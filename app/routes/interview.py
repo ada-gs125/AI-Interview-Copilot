@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.config import get_settings
@@ -186,6 +188,21 @@ async def create_session_from_upload(
             output_language=output_language,
             questions=questions,
         )
+        if effective_demo_mode:
+            return SessionResponse(
+                id=0,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                role_type=role_type,
+                output_language=output_language,
+                demo_mode=True,
+                job_description=job_description,
+                resume_text=resume_text,
+                jd_analysis=jd_analysis,
+                resume_match=resume_match,
+                questions=questions,
+                answers=answers,
+            )
+
         session_id = create_session(
             role_type=role_type,
             output_language=output_language,
