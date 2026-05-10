@@ -44,63 +44,64 @@ st.markdown(
     section[data-testid="stSidebar"] { background: #f7f8fa; }
     .small-muted { color: #667085; font-size: 0.9rem; }
     .workflow-panel {
-        margin-top: 1.9rem;
-        max-width: 440px;
+        margin-top: 2.6rem;
+        max-width: 280px;
+        opacity: 0.78;
     }
     .workflow-kicker {
-        color: #ef5350;
-        font-size: 0.78rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        margin-bottom: 0.35rem;
+        color: #a5abb7;
+        font-size: 0.72rem;
+        font-weight: 650;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.25rem;
         text-transform: uppercase;
     }
     .workflow-title {
-        color: #2f3040;
-        font-size: 1.28rem;
-        font-weight: 750;
-        margin-bottom: 1rem;
+        color: #575d6d;
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 0.85rem;
     }
     .pipeline-step {
         display: grid;
-        grid-template-columns: 34px 1fr;
-        column-gap: 0.8rem;
+        grid-template-columns: 23px 1fr;
+        column-gap: 0.55rem;
         align-items: start;
-        margin-bottom: 1rem;
+        margin-bottom: 0.72rem;
     }
     .step-index {
         align-items: center;
-        background: #fff3f2;
-        border: 1px solid #ffd8d5;
+        background: #fafafa;
+        border: 1px solid #eceef3;
         border-radius: 50%;
-        color: #d93d38;
+        color: #9aa1af;
         display: flex;
-        font-size: 0.82rem;
-        font-weight: 750;
-        height: 30px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        height: 22px;
         justify-content: center;
         line-height: 1;
-        width: 30px;
+        width: 22px;
     }
     .step-title {
-        color: #303141;
-        font-size: 0.98rem;
-        font-weight: 700;
+        color: #5e6472;
+        font-size: 0.84rem;
+        font-weight: 650;
         line-height: 1.25;
-        margin-bottom: 0.18rem;
+        margin-bottom: 0.08rem;
     }
     .step-copy {
-        color: #7b8190;
-        font-size: 0.88rem;
-        line-height: 1.35;
+        color: #9aa1af;
+        font-size: 0.76rem;
+        line-height: 1.28;
     }
     .workflow-note {
         border-top: 1px solid #eceef3;
-        color: #7b8190;
-        font-size: 0.86rem;
-        line-height: 1.4;
-        margin-top: 1.15rem;
-        padding-top: 0.95rem;
+        color: #9aa1af;
+        font-size: 0.74rem;
+        line-height: 1.32;
+        margin-top: 0.9rem;
+        padding-top: 0.72rem;
     }
     </style>
     """,
@@ -290,7 +291,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-left, right = st.columns([0.9, 1.1], gap="large")
+left, right = st.columns([1.42, 0.58], gap="large")
 
 with left:
     resume_file = st.file_uploader("Resume PDF", type=["pdf"])
@@ -332,7 +333,7 @@ with right:
                 </div>
             </div>
             <div class="workflow-note">
-                Output language follows the sidebar setting, with Match JD using the job description language.
+                Uses the sidebar language setting.
             </div>
         </div>
         """,
