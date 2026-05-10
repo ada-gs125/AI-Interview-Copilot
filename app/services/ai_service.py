@@ -1,3 +1,5 @@
+import json
+
 from openai import OpenAI
 
 from app.config import Settings
@@ -101,28 +103,31 @@ class AIInterviewService:
         output_language: OutputLanguage,
         questions: QuestionSet,
     ) -> AnswerSet:
-        flattened: list[tuple[str, str]] = []
+        flattened: list[dict[str, str]] = []
         for category, items in (
             ("Technical", questions.technical_questions),
             ("Project Deep-Dive", questions.project_deep_dive_questions),
             ("System Design", questions.system_design_questions),
             ("Behavioral", questions.behavioral_questions),
         ):
-            flattened.extend((category, item.question) for item in items)
+            flattened.extend({"category": category, "question": item.question} for item in items)
 
-        answers = [
-            self.generate_answer(
-                GenerateAnswerRequest(
-                    resume_text=resume_text,
-                    role_type=role_type,
-                    output_language=output_language,
-                    category=category,
-                    question=question,
-                )
-            )
-            for category, question in flattened
-        ]
-        return AnswerSet(answers=answers)
+        return self._parse(
+            AnswerSet,
+            system=(
+                "You are an interview answer coach. Generate concise, natural answers for every question. "
+                "Use only the resume information supplied by the user. "
+                "Do not invent employers, project names, technologies, metrics, dates, or outcomes. "
+                "If the resume lacks direct evidence, say how to honestly frame adjacent experience. "
+                "Return one answer for each input question, preserving category and question text exactly. "
+                f"{self._language_instruction(output_language)}"
+            ),
+            user=(
+                f"Target role type: {role_type}\n\n"
+                f"Questions JSON:\n{json.dumps(flattened, ensure_ascii=False)}\n\n"
+                f"Resume:\n{resume_text}"
+            ),
+        )
 
     def _parse(self, schema: type, *, system: str, user: str):
         response = self.client.responses.parse(

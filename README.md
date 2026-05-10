@@ -8,6 +8,7 @@ AI Interview Copilot is a local AI SaaS prototype for software and AI interview 
 - Technical, project, system design, and behavioral questions
 - Personalized answer scripts grounded only in the resume
 - English, Chinese, or JD-language-matched outputs
+- Demo mode for portfolio walkthroughs without OpenAI API spend
 - Saved preparation sessions in SQLite
 
 ## Tech Stack
@@ -76,6 +77,10 @@ The frontend supports three output language modes:
 - `Match job description language`
 - `English`
 - `Chinese`
+
+Turn on `Demo mode` in the sidebar to generate sample analysis without OpenAI API calls. If `OPENAI_API_KEY` is not configured, the backend automatically uses demo responses.
+
+The full session workflow batches answer generation into one OpenAI call instead of calling the model once per question.
 
 ## API Endpoints
 

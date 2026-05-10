@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from typing import Any
 
@@ -117,12 +119,14 @@ def create_session(
     job_description: str,
     role_type: str,
     output_language: str,
+    demo_mode: bool,
 ) -> dict[str, Any]:
     files = {"resume_pdf": (resume_file.name, resume_file.getvalue(), "application/pdf")}
     data = {
         "job_description": job_description,
         "role_type": role_type,
         "output_language": output_language,
+        "demo_mode": demo_mode,
     }
     response = requests.post(
         f"{API_BASE_URL}/sessions/from-upload",
@@ -132,6 +136,22 @@ def create_session(
     )
     response.raise_for_status()
     return response.json()
+
+
+def friendly_api_error(exc: requests.HTTPError) -> tuple[str, str | None]:
+    if exc.response is None:
+        return str(exc), None
+    try:
+        payload = exc.response.json()
+    except ValueError:
+        return exc.response.text, None
+
+    detail = payload.get("detail", payload)
+    if isinstance(detail, dict):
+        return detail.get("message", "The request failed."), detail.get("action")
+    if isinstance(detail, str):
+        return detail, None
+    return str(detail), None
 
 
 def show_skill_list(title: str, items: list[dict[str, Any]]) -> None:
@@ -173,6 +193,8 @@ def show_session(session: dict[str, Any]) -> None:
     metric_cols[2].metric("Questions", sum(len(v) for v in questions.values()))
     metric_cols[3].metric("Answers", len(answers))
     st.caption(f"Output language: {session.get('output_language', 'Match job description language')}")
+    if session.get("demo_mode"):
+        st.info("Demo mode result: sample data was generated without OpenAI API calls.")
 
     tabs = st.tabs(["Overview", "JD Analysis", "Resume Match", "Questions", "Answers", "Raw JSON"])
 
@@ -242,6 +264,11 @@ with st.sidebar:
         OUTPUT_LANGUAGES,
         format_func=lambda value: OUTPUT_LANGUAGE_LABELS[value],
     )
+    demo_mode = st.toggle(
+        "Demo mode",
+        value=False,
+        help="Use sample AI outputs without spending OpenAI API credits.",
+    )
     st.text_input("Backend API", value=API_BASE_URL, disabled=True)
 
     st.divider()
@@ -249,7 +276,8 @@ with st.sidebar:
     try:
         summaries = api_get("/sessions")
         for summary in summaries:
-            label = f"#{summary['id']} | {summary['role_type']} | {summary['overall_fit_score']}"
+            mode = " | demo" if summary.get("demo_mode") else ""
+            label = f"#{summary['id']} | {summary['role_type']} | {summary['overall_fit_score']}{mode}"
             if st.button(label, key=f"session-{summary['id']}", use_container_width=True):
                 st.session_state["active_session"] = api_get(f"/sessions/{summary['id']}")
     except requests.RequestException:
@@ -324,11 +352,14 @@ if run:
                     job_description.strip(),
                     selected_role,
                     selected_output_language,
+                    demo_mode,
                 )
                 st.success("Session generated and saved.")
             except requests.HTTPError as exc:
-                detail = exc.response.text if exc.response is not None else str(exc)
-                st.error(f"API error: {detail}")
+                message, action = friendly_api_error(exc)
+                st.error(message)
+                if action:
+                    st.info(action)
             except requests.RequestException as exc:
                 st.error(f"Could not reach backend: {exc}")
 

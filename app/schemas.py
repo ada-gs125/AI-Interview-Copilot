@@ -19,6 +19,7 @@ class AnalyzeJDRequest(BaseModel):
     job_description: str = Field(min_length=50)
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
+    demo_mode: bool = False
 
 
 class SkillItem(BaseModel):
@@ -43,6 +44,7 @@ class ResumeMatchRequest(BaseModel):
     job_description: str = Field(min_length=50)
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
+    demo_mode: bool = False
 
 
 class EvidenceMatch(BaseModel):
@@ -66,6 +68,7 @@ class GenerateQuestionsRequest(BaseModel):
     job_description: str = Field(min_length=50)
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
+    demo_mode: bool = False
     jd_analysis: Optional[JDAnalysis] = None
     resume_match: Optional[ResumeMatch] = None
 
@@ -87,6 +90,7 @@ class GenerateAnswerRequest(BaseModel):
     resume_text: str = Field(min_length=50)
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
+    demo_mode: bool = False
     question: str = Field(min_length=10)
     category: str = Field(min_length=3)
 
@@ -108,6 +112,7 @@ class SessionResponse(BaseModel):
     created_at: str
     role_type: RoleType
     output_language: OutputLanguage
+    demo_mode: bool = False
     job_description: str
     resume_text: str
     jd_analysis: JDAnalysis
@@ -121,6 +126,7 @@ class SessionSummary(BaseModel):
     created_at: str
     role_type: RoleType
     output_language: OutputLanguage
+    demo_mode: bool = False
     overall_fit_score: int
     role_summary: str
     missing_skill_count: int
