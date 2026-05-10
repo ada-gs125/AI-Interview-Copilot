@@ -12,10 +12,13 @@ RoleType = Literal[
     "Full-stack AI Engineer",
 ]
 
+OutputLanguage = Literal["English", "Chinese", "Match job description language"]
+
 
 class AnalyzeJDRequest(BaseModel):
     job_description: str = Field(min_length=50)
     role_type: RoleType
+    output_language: OutputLanguage = "Match job description language"
 
 
 class SkillItem(BaseModel):
@@ -39,6 +42,7 @@ class ResumeMatchRequest(BaseModel):
     resume_text: str = Field(min_length=50)
     job_description: str = Field(min_length=50)
     role_type: RoleType
+    output_language: OutputLanguage = "Match job description language"
 
 
 class EvidenceMatch(BaseModel):
@@ -61,6 +65,7 @@ class GenerateQuestionsRequest(BaseModel):
     resume_text: str = Field(min_length=50)
     job_description: str = Field(min_length=50)
     role_type: RoleType
+    output_language: OutputLanguage = "Match job description language"
     jd_analysis: Optional[JDAnalysis] = None
     resume_match: Optional[ResumeMatch] = None
 
@@ -81,6 +86,7 @@ class QuestionSet(BaseModel):
 class GenerateAnswerRequest(BaseModel):
     resume_text: str = Field(min_length=50)
     role_type: RoleType
+    output_language: OutputLanguage = "Match job description language"
     question: str = Field(min_length=10)
     category: str = Field(min_length=3)
 
@@ -101,6 +107,7 @@ class SessionResponse(BaseModel):
     id: int
     created_at: str
     role_type: RoleType
+    output_language: OutputLanguage
     job_description: str
     resume_text: str
     jd_analysis: JDAnalysis
@@ -113,6 +120,7 @@ class SessionSummary(BaseModel):
     id: int
     created_at: str
     role_type: RoleType
+    output_language: OutputLanguage
     overall_fit_score: int
     role_summary: str
     missing_skill_count: int

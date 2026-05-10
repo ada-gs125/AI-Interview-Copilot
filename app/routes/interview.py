@@ -8,6 +8,7 @@ from app.schemas import (
     GenerateAnswerRequest,
     GenerateQuestionsRequest,
     JDAnalysis,
+    OutputLanguage,
     QuestionSet,
     ResumeMatch,
     ResumeMatchRequest,
@@ -29,7 +30,11 @@ def _ai_service() -> AIInterviewService:
 @router.post("/analyze-jd", response_model=JDAnalysis)
 def analyze_jd(request: AnalyzeJDRequest) -> JDAnalysis:
     try:
-        return _ai_service().analyze_jd(request.job_description, request.role_type)
+        return _ai_service().analyze_jd(
+            request.job_description,
+            request.role_type,
+            request.output_language,
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -39,6 +44,7 @@ async def match_resume(
     resume_pdf: UploadFile = File(...),
     job_description: str = Form(...),
     role_type: RoleType = Form(...),
+    output_language: OutputLanguage = Form("Match job description language"),
 ) -> ResumeMatch:
     try:
         resume_text = extract_resume_text(await resume_pdf.read())
@@ -47,6 +53,7 @@ async def match_resume(
                 resume_text=resume_text,
                 job_description=job_description,
                 role_type=role_type,
+                output_language=output_language,
             )
         )
     except ValueError as exc:
@@ -76,16 +83,18 @@ async def create_session_from_upload(
     resume_pdf: UploadFile = File(...),
     job_description: str = Form(...),
     role_type: RoleType = Form(...),
+    output_language: OutputLanguage = Form("Match job description language"),
 ) -> SessionResponse:
     try:
         resume_text = extract_resume_text(await resume_pdf.read())
         ai = _ai_service()
-        jd_analysis = ai.analyze_jd(job_description, role_type)
+        jd_analysis = ai.analyze_jd(job_description, role_type, output_language)
         resume_match = ai.match_resume(
             ResumeMatchRequest(
                 resume_text=resume_text,
                 job_description=job_description,
                 role_type=role_type,
+                output_language=output_language,
             )
         )
         questions = ai.generate_questions(
@@ -93,6 +102,7 @@ async def create_session_from_upload(
                 resume_text=resume_text,
                 job_description=job_description,
                 role_type=role_type,
+                output_language=output_language,
                 jd_analysis=jd_analysis,
                 resume_match=resume_match,
             )
@@ -100,10 +110,12 @@ async def create_session_from_upload(
         answers = ai.generate_answers_for_question_set(
             resume_text=resume_text,
             role_type=role_type,
+            output_language=output_language,
             questions=questions,
         )
         session_id = create_session(
             role_type=role_type,
+            output_language=output_language,
             job_description=job_description,
             resume_text=resume_text,
             jd_analysis=jd_analysis,
@@ -132,4 +144,3 @@ def session_detail(session_id: int) -> SessionResponse:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found.")
     return session
-

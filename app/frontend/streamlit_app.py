@@ -12,6 +12,16 @@ ROLE_TYPES = [
     "Agent Engineer",
     "Full-stack AI Engineer",
 ]
+OUTPUT_LANGUAGES = [
+    "Match job description language",
+    "English",
+    "Chinese",
+]
+OUTPUT_LANGUAGE_LABELS = {
+    "Match job description language": "Match JD",
+    "English": "English",
+    "Chinese": "Chinese",
+}
 
 
 st.set_page_config(page_title="AI Interview Copilot", layout="wide")
@@ -31,6 +41,65 @@ st.markdown(
     }
     section[data-testid="stSidebar"] { background: #f7f8fa; }
     .small-muted { color: #667085; font-size: 0.9rem; }
+    .workflow-panel {
+        margin-top: 1.9rem;
+        max-width: 440px;
+    }
+    .workflow-kicker {
+        color: #ef5350;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.35rem;
+        text-transform: uppercase;
+    }
+    .workflow-title {
+        color: #2f3040;
+        font-size: 1.28rem;
+        font-weight: 750;
+        margin-bottom: 1rem;
+    }
+    .pipeline-step {
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        column-gap: 0.8rem;
+        align-items: start;
+        margin-bottom: 1rem;
+    }
+    .step-index {
+        align-items: center;
+        background: #fff3f2;
+        border: 1px solid #ffd8d5;
+        border-radius: 50%;
+        color: #d93d38;
+        display: flex;
+        font-size: 0.82rem;
+        font-weight: 750;
+        height: 30px;
+        justify-content: center;
+        line-height: 1;
+        width: 30px;
+    }
+    .step-title {
+        color: #303141;
+        font-size: 0.98rem;
+        font-weight: 700;
+        line-height: 1.25;
+        margin-bottom: 0.18rem;
+    }
+    .step-copy {
+        color: #7b8190;
+        font-size: 0.88rem;
+        line-height: 1.35;
+    }
+    .workflow-note {
+        border-top: 1px solid #eceef3;
+        color: #7b8190;
+        font-size: 0.86rem;
+        line-height: 1.4;
+        margin-top: 1.15rem;
+        padding-top: 0.95rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -43,9 +112,18 @@ def api_get(path: str) -> Any:
     return response.json()
 
 
-def create_session(resume_file, job_description: str, role_type: str) -> dict[str, Any]:
+def create_session(
+    resume_file,
+    job_description: str,
+    role_type: str,
+    output_language: str,
+) -> dict[str, Any]:
     files = {"resume_pdf": (resume_file.name, resume_file.getvalue(), "application/pdf")}
-    data = {"job_description": job_description, "role_type": role_type}
+    data = {
+        "job_description": job_description,
+        "role_type": role_type,
+        "output_language": output_language,
+    }
     response = requests.post(
         f"{API_BASE_URL}/sessions/from-upload",
         files=files,
@@ -94,6 +172,7 @@ def show_session(session: dict[str, Any]) -> None:
     metric_cols[1].metric("Missing skills", len(resume_match["missing_skills"]))
     metric_cols[2].metric("Questions", sum(len(v) for v in questions.values()))
     metric_cols[3].metric("Answers", len(answers))
+    st.caption(f"Output language: {session.get('output_language', 'Match job description language')}")
 
     tabs = st.tabs(["Overview", "JD Analysis", "Resume Match", "Questions", "Answers", "Raw JSON"])
 
@@ -158,6 +237,11 @@ with st.sidebar:
     st.title("AI Interview Copilot")
     st.caption("Resume + JD -> interview strategy, questions, and grounded answers.")
     selected_role = st.selectbox("Target role type", ROLE_TYPES)
+    selected_output_language = st.selectbox(
+        "Output language",
+        OUTPUT_LANGUAGES,
+        format_func=lambda value: OUTPUT_LANGUAGE_LABELS[value],
+    )
     st.text_input("Backend API", value=API_BASE_URL, disabled=True)
 
     st.divider()
@@ -186,16 +270,45 @@ with left:
     run = st.button("Generate prep session", type="primary", use_container_width=True)
 
 with right:
-    st.subheader("Workflow")
     st.markdown(
         """
-        1. Parse resume PDF
-        2. Analyze JD requirements
-        3. Match resume evidence to the role
-        4. Generate interview questions
-        5. Draft grounded answer scripts
-        6. Save the session to SQLite
-        """
+        <div class="workflow-panel">
+            <div class="workflow-kicker">Run flow</div>
+            <div class="workflow-title">Prep pipeline</div>
+            <div class="pipeline-step">
+                <div class="step-index">1</div>
+                <div>
+                    <div class="step-title">Resume intake</div>
+                    <div class="step-copy">Extracts clean text from the uploaded PDF.</div>
+                </div>
+            </div>
+            <div class="pipeline-step">
+                <div class="step-index">2</div>
+                <div>
+                    <div class="step-title">Role analysis</div>
+                    <div class="step-copy">Maps JD requirements to skills, topics, and signals.</div>
+                </div>
+            </div>
+            <div class="pipeline-step">
+                <div class="step-index">3</div>
+                <div>
+                    <div class="step-title">Interview pack</div>
+                    <div class="step-copy">Builds matching insights, questions, and grounded answers.</div>
+                </div>
+            </div>
+            <div class="pipeline-step">
+                <div class="step-index">4</div>
+                <div>
+                    <div class="step-title">Saved session</div>
+                    <div class="step-copy">Stores the generated prep package for review.</div>
+                </div>
+            </div>
+            <div class="workflow-note">
+                Output language follows the sidebar setting, with Match JD using the job description language.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 if run:
@@ -210,6 +323,7 @@ if run:
                     resume_file,
                     job_description.strip(),
                     selected_role,
+                    selected_output_language,
                 )
                 st.success("Session generated and saved.")
             except requests.HTTPError as exc:

@@ -10,6 +10,7 @@ from app.schemas import (
     QuestionSet,
     ResumeMatch,
     ResumeMatchRequest,
+    OutputLanguage,
     RoleType,
 )
 
@@ -21,13 +22,19 @@ class AIInterviewService:
         self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_model
 
-    def analyze_jd(self, job_description: str, role_type: RoleType) -> JDAnalysis:
+    def analyze_jd(
+        self,
+        job_description: str,
+        role_type: RoleType,
+        output_language: OutputLanguage = "Match job description language",
+    ) -> JDAnalysis:
         return self._parse(
             JDAnalysis,
             system=(
                 "You are a senior technical recruiter and AI interview coach. "
                 "Extract concrete hiring signals from the job description. "
-                "Return only facts supported by the JD and keep items concise."
+                "Return only facts supported by the JD and keep items concise. "
+                f"{self._language_instruction(output_language)}"
             ),
             user=f"Target role type: {role_type}\n\nJob description:\n{job_description}",
         )
@@ -38,7 +45,8 @@ class AIInterviewService:
             system=(
                 "You are matching a candidate resume to a software/AI job description. "
                 "Use only evidence from the resume and JD. Penalize missing must-have skills, "
-                "but surface transferable strengths fairly."
+                "but surface transferable strengths fairly. "
+                f"{self._language_instruction(request.output_language)}"
             ),
             user=(
                 f"Target role type: {request.role_type}\n\n"
@@ -55,7 +63,8 @@ class AIInterviewService:
             system=(
                 "You are designing an interview preparation question bank. "
                 "Generate practical questions a real interviewer may ask. "
-                "Use a balanced mix of fundamentals, applied project discussion, system design, and behavior."
+                "Use a balanced mix of fundamentals, applied project discussion, system design, and behavior. "
+                f"{self._language_instruction(request.output_language)}"
             ),
             user=(
                 f"Target role type: {request.role_type}\n\n"
@@ -73,7 +82,8 @@ class AIInterviewService:
                 "You are an interview answer coach. Generate a concise, natural answer. "
                 "Use only the resume information supplied by the user. "
                 "Do not invent employers, project names, technologies, metrics, dates, or outcomes. "
-                "If the resume lacks direct evidence, say how to honestly frame adjacent experience."
+                "If the resume lacks direct evidence, say how to honestly frame adjacent experience. "
+                f"{self._language_instruction(request.output_language)}"
             ),
             user=(
                 f"Target role type: {request.role_type}\n"
@@ -88,6 +98,7 @@ class AIInterviewService:
         *,
         resume_text: str,
         role_type: RoleType,
+        output_language: OutputLanguage,
         questions: QuestionSet,
     ) -> AnswerSet:
         flattened: list[tuple[str, str]] = []
@@ -104,6 +115,7 @@ class AIInterviewService:
                 GenerateAnswerRequest(
                     resume_text=resume_text,
                     role_type=role_type,
+                    output_language=output_language,
                     category=category,
                     question=question,
                 )
@@ -126,3 +138,9 @@ class AIInterviewService:
             raise RuntimeError("The model did not return a parseable structured response.")
         return parsed
 
+    def _language_instruction(self, output_language: OutputLanguage) -> str:
+        if output_language == "English":
+            return "Write every user-facing field in English."
+        if output_language == "Chinese":
+            return "Write every user-facing field in Chinese."
+        return "Write every user-facing field in the same language as the job description."

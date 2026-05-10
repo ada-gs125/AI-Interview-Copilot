@@ -1,4 +1,4 @@
-from app.schemas import JDAnalysis, SkillItem
+from app.schemas import GenerateQuestionsRequest, JDAnalysis, SkillItem
 
 
 def test_jd_analysis_schema_accepts_expected_shape():
@@ -17,3 +17,12 @@ def test_jd_analysis_schema_accepts_expected_shape():
 
     assert analysis.required_technical_skills[0].name == "Python"
 
+
+def test_generate_questions_request_defaults_to_jd_language_matching():
+    request = GenerateQuestionsRequest(
+        resume_text="Python backend engineer with FastAPI, SQL, APIs, and AI workflow project experience.",
+        job_description="We need a backend AI engineer with Python, APIs, and LLM application experience.",
+        role_type="AI Engineer",
+    )
+
+    assert request.output_language == "Match job description language"
