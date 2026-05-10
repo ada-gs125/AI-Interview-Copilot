@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from typing import Any
 
 import requests
 import streamlit as st
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from app.services.report_export import (
+    build_markdown_report,
+    build_pdf_report,
+    pdf_filename,
+    report_filename,
+)
 
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
@@ -103,6 +116,12 @@ st.markdown(
         margin-top: 0.9rem;
         padding-top: 0.72rem;
     }
+    div[data-testid="stDownloadButton"] > button {
+        min-height: 2.05rem;
+        padding: 0.25rem 0.55rem;
+        font-size: 0.82rem;
+        line-height: 1;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -193,7 +212,29 @@ def show_session(session: dict[str, Any]) -> None:
     metric_cols[1].metric("Missing skills", len(resume_match["missing_skills"]))
     metric_cols[2].metric("Questions", sum(len(v) for v in questions.values()))
     metric_cols[3].metric("Answers", len(answers))
-    st.caption(f"Output language: {session.get('output_language', 'Match job description language')}")
+
+    meta_col, md_col, pdf_col = st.columns([1, 0.12, 0.13], vertical_alignment="center")
+    with meta_col:
+        st.caption(f"Output language: {session.get('output_language', 'Match job description language')}")
+    with md_col:
+        st.download_button(
+            "↓ MD",
+            data=build_markdown_report(session),
+            file_name=report_filename(session),
+            mime="text/markdown",
+            use_container_width=True,
+            help="Download Markdown report",
+        )
+    with pdf_col:
+        st.download_button(
+            "↓ PDF",
+            data=build_pdf_report(session),
+            file_name=pdf_filename(session),
+            mime="application/pdf",
+            use_container_width=True,
+            help="Download PDF report",
+        )
+
     if session.get("demo_mode"):
         st.info("Demo mode result: sample data was generated without OpenAI API calls.")
 

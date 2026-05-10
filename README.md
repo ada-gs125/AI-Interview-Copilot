@@ -9,6 +9,7 @@ AI Interview Copilot is a local AI SaaS prototype for software and AI interview 
 - Personalized answer scripts grounded only in the resume
 - English, Chinese, or JD-language-matched outputs
 - Demo mode for portfolio walkthroughs without OpenAI API spend
+- Markdown and PDF interview prep report exports
 - Saved preparation sessions in SQLite
 
 ## Tech Stack
