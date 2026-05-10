@@ -44,17 +44,58 @@ st.set_page_config(page_title="AI Interview Copilot", layout="wide")
 st.markdown(
     """
     <style>
+    :root {
+        color-scheme: light;
+    }
+
+    html, body, [data-testid="stAppViewContainer"], .stApp {
+        background: #ffffff;
+        color: #242833;
+    }
+
     .block-container { padding-top: 1.6rem; max-width: 1220px; }
-    h1, h2, h3 { letter-spacing: 0; }
+    h1, h2, h3, p, li, label { letter-spacing: 0; }
+    h1, h2, h3, p, li, label,
+    [data-testid="stMarkdownContainer"],
+    [data-testid="stMetricValue"],
+    [data-testid="stMetricLabel"] {
+        color: #242833;
+    }
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { border-radius: 6px; padding: 8px 12px; }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 6px;
+        color: #4f5665;
+        padding: 8px 12px;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #242833;
+    }
     div[data-testid="stMetric"] {
         border: 1px solid #e6e8ec;
         border-radius: 8px;
         padding: 14px 16px;
         background: #ffffff;
     }
-    section[data-testid="stSidebar"] { background: #f7f8fa; }
+    section[data-testid="stSidebar"] {
+        background: #f7f8fa;
+        color: #242833;
+    }
+    section[data-testid="stSidebar"] * {
+        color-scheme: light;
+    }
+    div[data-baseweb="input"] input,
+    div[data-baseweb="select"] > div,
+    textarea {
+        background-color: #ffffff;
+        color: #242833;
+        -webkit-text-fill-color: #242833;
+    }
+    div[data-baseweb="input"] input:disabled {
+        background-color: #f4f6f8;
+        color: #667085;
+        -webkit-text-fill-color: #667085;
+        opacity: 1;
+    }
     .small-muted { color: #667085; font-size: 0.9rem; }
     .workflow-panel {
         margin-top: 2.6rem;
@@ -121,6 +162,11 @@ st.markdown(
         padding: 0.25rem 0.55rem;
         font-size: 0.82rem;
         line-height: 1;
+    }
+    div[data-testid="stButton"] button[kind="primary"],
+    div[data-testid="stButton"] button[kind="primary"] * {
+        color: #ffffff;
+        -webkit-text-fill-color: #ffffff;
     }
     </style>
     """,
