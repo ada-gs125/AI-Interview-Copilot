@@ -86,3 +86,32 @@ def test_demo_preview_session_can_use_unsaved_id():
 
     assert session.id == 0
     assert session.demo_mode is True
+
+
+def test_mock_batch_answers_use_chinese_categories_when_matching_chinese_jd():
+    service = MockAIInterviewService()
+    chinese_jd = (
+        "我们需要一名 AI 工程师，熟悉 Python、后端 API、LLM 应用、系统设计、数据库持久化、"
+        "结构化输出、提示词工程，并且能够独立交付端到端的 AI 产品功能。"
+    )
+    questions = service.generate_questions(
+        GenerateQuestionsRequest(
+            resume_text="Python FastAPI backend engineer with APIs, SQL, and AI workflow project experience.",
+            job_description=chinese_jd,
+            role_type="AI Engineer",
+            output_language="Match job description language",
+            demo_mode=True,
+        )
+    )
+
+    answers = service.generate_answers_for_question_set(
+        resume_text="Python FastAPI backend engineer with APIs, SQL, and AI workflow project experience.",
+        job_description=chinese_jd,
+        role_type="AI Engineer",
+        output_language="Match job description language",
+        questions=questions,
+    )
+
+    categories = {answer.category for answer in answers.answers}
+    assert "技术问题" in categories
+    assert "Technical" not in categories

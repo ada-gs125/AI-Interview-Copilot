@@ -91,6 +91,7 @@ class GenerateAnswerRequest(BaseModel):
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
     demo_mode: bool = False
+    job_description: Optional[str] = Field(default=None, min_length=50)
     question: str = Field(min_length=10)
     category: str = Field(min_length=3)
 

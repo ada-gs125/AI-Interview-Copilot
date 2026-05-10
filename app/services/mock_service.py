@@ -146,7 +146,7 @@ class MockAIInterviewService:
         )
 
     def generate_answer(self, request: GenerateAnswerRequest) -> AnswerResult:
-        chinese = _use_chinese(request.output_language, request.question)
+        chinese = _use_chinese(request.output_language, request.job_description or request.question)
         if chinese:
             return AnswerResult(
                 category=request.category,
@@ -167,22 +167,33 @@ class MockAIInterviewService:
         self,
         *,
         resume_text: str,
+        job_description: str = "",
         role_type: RoleType,
         output_language: OutputLanguage,
         questions: QuestionSet,
     ) -> AnswerSet:
+        if _use_chinese(output_language, job_description):
+            categories = (
+                ("技术问题", questions.technical_questions),
+                ("项目深挖问题", questions.project_deep_dive_questions),
+                ("系统设计问题", questions.system_design_questions),
+                ("行为面试问题", questions.behavioral_questions),
+            )
+        else:
+            categories = (
+                ("Technical", questions.technical_questions),
+                ("Project Deep-Dive", questions.project_deep_dive_questions),
+                ("System Design", questions.system_design_questions),
+                ("Behavioral", questions.behavioral_questions),
+            )
         answers: list[AnswerResult] = []
-        for category, items in (
-            ("Technical", questions.technical_questions),
-            ("Project Deep-Dive", questions.project_deep_dive_questions),
-            ("System Design", questions.system_design_questions),
-            ("Behavioral", questions.behavioral_questions),
-        ):
+        for category, items in categories:
             for item in items:
                 answers.append(
                     self.generate_answer(
                         GenerateAnswerRequest(
                             resume_text=resume_text,
+                            job_description=job_description or None,
                             role_type=role_type,
                             output_language=output_language,
                             category=category,

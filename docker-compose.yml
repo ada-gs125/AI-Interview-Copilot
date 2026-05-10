@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: interview_copilot
+      POSTGRES_USER: interview_copilot
+      POSTGRES_PASSWORD: interview_copilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U interview_copilot -d interview_copilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://interview_copilot:interview_copilot@postgres:5432/interview_copilot
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

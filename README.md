@@ -10,13 +10,13 @@ AI Interview Copilot is a local AI SaaS prototype for software and AI interview 
 - English, Chinese, or JD-language-matched outputs
 - Demo mode for portfolio walkthroughs without OpenAI API spend
 - Markdown and PDF interview prep report exports
-- Saved preparation sessions in SQLite
+- Saved preparation sessions in PostgreSQL
 
 ## Tech Stack
 
 - Backend: Python 3.11, FastAPI, Uvicorn
 - AI: OpenAI API with structured Pydantic outputs
-- Database: SQLite
+- Database: PostgreSQL
 - Frontend: Streamlit
 - PDF parsing: pdfplumber with PyPDF2 fallback
 - Deployment: Docker
@@ -47,9 +47,18 @@ Add your API key to `.env`:
 ```env
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
+DATABASE_URL=postgresql://interview_copilot:interview_copilot@localhost:5432/interview_copilot
 ```
 
 ## Run Locally
+
+Start PostgreSQL first:
+
+```bash
+make db
+```
+
+This starts a local Docker container named `ai-interview-copilot-postgres`.
 
 Start backend and frontend together:
 
@@ -71,7 +80,7 @@ streamlit run app/frontend/streamlit_app.py
 
 Open Streamlit at `http://localhost:8501`.
 
-SQLite does not need a separate terminal because it runs as a local database file at `data/interview_copilot.db`.
+The backend creates the PostgreSQL `sessions` table on startup.
 
 The frontend supports three output language modes:
 
@@ -97,6 +106,18 @@ The full session workflow batches answer generation into one OpenAI call instead
 FastAPI docs are available at `http://localhost:8000/docs`.
 
 ## Docker
+
+```bash
+docker compose up --build
+```
+
+This starts PostgreSQL and the FastAPI backend. Run Streamlit separately if you want the local frontend:
+
+```bash
+API_BASE_URL=http://localhost:8000 streamlit run app/frontend/streamlit_app.py
+```
+
+You can still build the backend image directly:
 
 ```bash
 docker build -t ai-interview-copilot .

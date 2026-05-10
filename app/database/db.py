@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
-import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterator, Optional
+from typing import Any, Iterator, Optional
+
+import psycopg
+from psycopg.rows import DictRow, dict_row
+from psycopg.types.json import Jsonb
 
 from app.config import get_settings
 from app.schemas import (
@@ -22,19 +23,15 @@ from app.schemas import (
 DEFAULT_OUTPUT_LANGUAGE: OutputLanguage = "Match job description language"
 
 
-def _db_path() -> Path:
-    path = get_settings().database_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 @contextmanager
-def get_connection() -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
+def get_connection() -> Iterator[psycopg.Connection[DictRow]]:
+    conn = psycopg.connect(get_settings().database_url, row_factory=dict_row)
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -44,28 +41,26 @@ def init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                created_at TEXT NOT NULL,
+                id BIGSERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL,
                 role_type TEXT NOT NULL,
                 output_language TEXT NOT NULL DEFAULT 'Match job description language',
-                demo_mode INTEGER NOT NULL DEFAULT 0,
+                demo_mode BOOLEAN NOT NULL DEFAULT FALSE,
                 job_description TEXT NOT NULL,
                 resume_text TEXT NOT NULL,
-                jd_analysis TEXT NOT NULL,
-                resume_match TEXT NOT NULL,
-                questions TEXT NOT NULL,
-                answers TEXT NOT NULL
+                jd_analysis JSONB NOT NULL,
+                resume_match JSONB NOT NULL,
+                questions JSONB NOT NULL,
+                answers JSONB NOT NULL
             )
             """
         )
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
-        if "output_language" not in columns:
-            conn.execute(
-                "ALTER TABLE sessions ADD COLUMN output_language TEXT NOT NULL DEFAULT "
-                "'Match job description language'"
-            )
-        if "demo_mode" not in columns:
-            conn.execute("ALTER TABLE sessions ADD COLUMN demo_mode INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sessions_created_at
+            ON sessions (created_at DESC)
+            """
+        )
 
 
 def create_session(
@@ -80,69 +75,83 @@ def create_session(
     questions: QuestionSet,
     answers: AnswerSet,
 ) -> int:
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(timezone.utc)
     with get_connection() as conn:
-        cursor = conn.execute(
+        row = conn.execute(
             """
             INSERT INTO sessions (
                 created_at, role_type, output_language, demo_mode, job_description, resume_text,
                 jd_analysis, resume_match, questions, answers
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (
                 created_at,
                 role_type,
                 output_language,
-                int(demo_mode),
+                demo_mode,
                 job_description,
                 resume_text,
-                jd_analysis.model_dump_json(),
-                resume_match.model_dump_json(),
-                questions.model_dump_json(),
-                answers.model_dump_json(),
+                Jsonb(jd_analysis.model_dump(mode="json")),
+                Jsonb(resume_match.model_dump(mode="json")),
+                Jsonb(questions.model_dump(mode="json")),
+                Jsonb(answers.model_dump(mode="json")),
             ),
-        )
-        return int(cursor.lastrowid)
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("PostgreSQL did not return a session id.")
+        return int(row["id"])
 
 
-def _row_to_session(row: sqlite3.Row) -> SessionResponse:
+def _created_at_to_iso(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _row_to_session(row: DictRow) -> SessionResponse:
     return SessionResponse(
         id=row["id"],
-        created_at=row["created_at"],
+        created_at=_created_at_to_iso(row["created_at"]),
         role_type=row["role_type"],
         output_language=row["output_language"] or DEFAULT_OUTPUT_LANGUAGE,
         demo_mode=bool(row["demo_mode"]),
         job_description=row["job_description"],
         resume_text=row["resume_text"],
-        jd_analysis=JDAnalysis.model_validate(json.loads(row["jd_analysis"])),
-        resume_match=ResumeMatch.model_validate(json.loads(row["resume_match"])),
-        questions=QuestionSet.model_validate(json.loads(row["questions"])),
-        answers=AnswerSet.model_validate(json.loads(row["answers"])),
+        jd_analysis=JDAnalysis.model_validate(row["jd_analysis"]),
+        resume_match=ResumeMatch.model_validate(row["resume_match"]),
+        questions=QuestionSet.model_validate(row["questions"]),
+        answers=AnswerSet.model_validate(row["answers"]),
     )
 
 
 def get_session(session_id: int) -> Optional[SessionResponse]:
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        row = conn.execute("SELECT * FROM sessions WHERE id = %s", (session_id,)).fetchone()
     return _row_to_session(row) if row else None
 
 
 def list_sessions(limit: int = 25) -> list[SessionSummary]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM sessions ORDER BY datetime(created_at) DESC LIMIT ?",
+            """
+            SELECT *
+            FROM sessions
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
             (limit,),
         ).fetchall()
 
     summaries: list[SessionSummary] = []
     for row in rows:
-        jd_analysis = JDAnalysis.model_validate(json.loads(row["jd_analysis"]))
-        resume_match = ResumeMatch.model_validate(json.loads(row["resume_match"]))
+        jd_analysis = JDAnalysis.model_validate(row["jd_analysis"])
+        resume_match = ResumeMatch.model_validate(row["resume_match"])
         summaries.append(
             SessionSummary(
                 id=row["id"],
-                created_at=row["created_at"],
+                created_at=_created_at_to_iso(row["created_at"]),
                 role_type=row["role_type"],
                 output_language=row["output_language"] or DEFAULT_OUTPUT_LANGUAGE,
                 demo_mode=bool(row["demo_mode"]),

@@ -184,6 +184,7 @@ async def create_session_from_upload(
         )
         answers = ai.generate_answers_for_question_set(
             resume_text=resume_text,
+            job_description=job_description,
             role_type=role_type,
             output_language=output_language,
             questions=questions,
