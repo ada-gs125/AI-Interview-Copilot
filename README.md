@@ -48,7 +48,13 @@ OPENAI_MODEL=gpt-4.1-mini
 
 ## Run Locally
 
-Start the backend:
+Start backend and frontend together:
+
+```bash
+make dev
+```
+
+Or run them separately. Start the backend:
 
 ```bash
 uvicorn app.main:app --reload
@@ -61,6 +67,8 @@ streamlit run app/frontend/streamlit_app.py
 ```
 
 Open Streamlit at `http://localhost:8501`.
+
+SQLite does not need a separate terminal because it runs as a local database file at `data/interview_copilot.db`.
 
 ## API Endpoints
 
