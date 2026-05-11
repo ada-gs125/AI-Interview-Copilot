@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -156,6 +158,29 @@ def test_generate_questions_endpoint_returns_all_categories(monkeypatch):
     assert payload["project_deep_dive_questions"]
     assert payload["system_design_questions"]
     assert payload["behavioral_questions"]
+
+
+def test_generate_answer_stream_returns_sse_tokens(monkeypatch):
+    with _client_without_startup_db(monkeypatch) as client:
+        response = client.post(
+            "/generate-answer/stream",
+            json={
+                "resume_text": RESUME_TEXT,
+                "job_description": ENGLISH_JD,
+                "role_type": "AI Engineer",
+                "output_language": "English",
+                "demo_mode": True,
+                "question": "How do you make LLM output reliable for application code?",
+                "category": "Technical",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    lines = [line for line in response.text.splitlines() if line.startswith("data: ")]
+    assert lines[-1] == "data: [DONE]"
+    tokens = [json.loads(line[6:]) for line in lines[:-1]]
+    assert "".join(tokens)
 
 
 def test_create_session_from_upload_demo_mode_does_not_persist(monkeypatch):

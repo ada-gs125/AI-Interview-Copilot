@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.database import (
@@ -472,6 +474,26 @@ def generate_answer(request: GenerateAnswerRequest, user: UserResponse = Depends
         return _ai_service(effective_demo_mode).generate_answer(request)
     except Exception as exc:
         _raise_ai_error(exc)
+
+
+@router.post("/generate-answer/stream")
+def generate_answer_stream(
+    request: GenerateAnswerRequest,
+    user: UserResponse = Depends(current_user),
+) -> StreamingResponse:
+    effective_demo_mode = _effective_demo_mode(request.demo_mode)
+    ai = _ai_service(effective_demo_mode)
+
+    def event_stream():
+        try:
+            for chunk in ai.stream_answer(request):
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception as exc:
+            _, detail = _ai_error_detail(exc)
+            yield f"event: error\ndata: {json.dumps(detail)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/sessions/from-upload", response_model=SessionResponse)

@@ -30,6 +30,7 @@ from app.frontend.api_client import (
     login_user,
     register_user,
     should_fallback_to_sync,
+    stream_answer,
 )
 
 
@@ -455,13 +456,40 @@ def show_session(session: dict[str, Any]) -> None:
         show_questions("Behavioral", questions["behavioral_questions"])
 
     with tabs[4]:
-        for answer in answers:
+        session_id = session.get("id", "demo")
+        for i, answer in enumerate(answers):
+            regen_active_key = f"regen_active_{session_id}_{i}"
+            regen_result_key = f"regen_result_{session_id}_{i}"
             with st.expander(f"{answer['category']}: {answer['question']}", expanded=False):
-                st.write(answer["concise_answer"])
+                if st.session_state.get(regen_active_key):
+                    st.session_state.pop(regen_active_key)
+                    payload = {
+                        "resume_text": session["resume_text"],
+                        "job_description": session.get("job_description"),
+                        "role_type": session["role_type"],
+                        "output_language": session["output_language"],
+                        "demo_mode": session.get("demo_mode", False),
+                        "question": answer["question"],
+                        "category": answer["category"],
+                    }
+                    try:
+                        result = st.write_stream(
+                            stream_answer(API_BASE_URL, payload, st.session_state.get("access_token"))
+                        )
+                        st.session_state[regen_result_key] = result
+                    except requests.RequestException as exc:
+                        st.error(f"Could not reach backend: {exc}")
+                else:
+                    st.write(st.session_state.get(regen_result_key, answer["concise_answer"]))
+
                 st.caption("Resume evidence used")
                 for evidence in answer["resume_evidence_used"]:
                     st.markdown(f"- {evidence}")
                 st.caption(answer["honesty_guardrail"])
+
+                if st.button("↺ Regenerate", key=f"regen_btn_{session_id}_{i}", help="Regenerate this answer with live streaming"):
+                    st.session_state[regen_active_key] = True
+                    st.rerun()
 
     with tabs[5]:
         st.json(session)
