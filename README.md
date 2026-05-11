@@ -11,6 +11,7 @@ AI Interview Copilot is a local AI SaaS prototype for software and AI interview 
 - Demo mode for portfolio walkthroughs without OpenAI API spend
 - Markdown and PDF interview prep report exports
 - Saved preparation sessions in PostgreSQL
+- Async session jobs with progress, step timing, and AI usage metadata
 
 ## Tech Stack
 
@@ -47,6 +48,8 @@ Add your API key to `.env`:
 ```env
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
+OPENAI_INPUT_COST_PER_1M_TOKENS=0
+OPENAI_OUTPUT_COST_PER_1M_TOKENS=0
 DATABASE_URL=postgresql://interview_copilot:interview_copilot@localhost:5432/interview_copilot
 ```
 
@@ -113,10 +116,21 @@ The full session workflow batches answer generation into one OpenAI call instead
 - `POST /generate-questions`
 - `POST /generate-answer`
 - `POST /sessions/from-upload`
+- `POST /sessions/jobs`
+- `GET /sessions/jobs/{job_id}`
 - `GET /sessions`
 - `GET /sessions/{session_id}`
 
 FastAPI docs are available at `http://localhost:8000/docs`.
+
+For production-style workflows, prefer the async job API:
+
+1. `POST /sessions/jobs` with the same multipart form fields as `/sessions/from-upload`.
+2. Poll `GET /sessions/jobs/{job_id}` until the status is `succeeded` or `failed`.
+3. Read `steps`, `progress_percent`, `usage`, and `result` from the job response.
+
+Set the optional token price environment variables above if you want `usage.estimated_cost_usd`
+to be calculated for real OpenAI calls.
 
 ## Deploy Streamlit Frontend
 

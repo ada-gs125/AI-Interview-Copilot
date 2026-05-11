@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,15 @@ OUTPUT_LANGUAGE_LABELS = {
     "Match job description language": "Match JD",
     "English": "English",
     "Chinese": "Chinese",
+}
+TERMINAL_JOB_STATUSES = {"succeeded", "failed"}
+STEP_LABELS = {
+    "parse_resume": "Resume intake",
+    "analyze_jd": "JD analysis",
+    "match_resume": "Resume match",
+    "generate_questions": "Question generation",
+    "generate_answers": "Answer generation",
+    "save_session": "Session save",
 }
 
 
@@ -196,7 +206,7 @@ def api_get(path: str) -> Any:
     return response.json()
 
 
-def create_session(
+def create_session_job(
     resume_file,
     job_description: str,
     role_type: str,
@@ -211,13 +221,17 @@ def create_session(
         "demo_mode": demo_mode,
     }
     response = requests.post(
-        f"{API_BASE_URL}/sessions/from-upload",
+        f"{API_BASE_URL}/sessions/jobs",
         files=files,
         data=data,
-        timeout=240,
+        timeout=30,
     )
     response.raise_for_status()
     return response.json()
+
+
+def get_session_job(status_url: str) -> dict[str, Any]:
+    return api_get(status_url)
 
 
 def friendly_api_error(exc: requests.HTTPError) -> tuple[str, str | None]:
@@ -234,6 +248,65 @@ def friendly_api_error(exc: requests.HTTPError) -> tuple[str, str | None]:
     if isinstance(detail, str):
         return detail, None
     return str(detail), None
+
+
+def show_job_progress(job: dict[str, Any]) -> None:
+    status = job.get("status", "queued")
+    progress = int(job.get("progress_percent", 0))
+    current_step = job.get("current_step") or "queued"
+    job_id = job.get("id", "")
+
+    top_cols = st.columns([0.42, 0.22, 0.18, 0.18])
+    top_cols[0].metric("Job", job_id[:8] if job_id else "pending")
+    top_cols[1].metric("Status", status)
+    top_cols[2].metric("Progress", f"{progress}%")
+    top_cols[3].metric("Step", STEP_LABELS.get(current_step, current_step))
+    st.progress(progress)
+
+    steps = job.get("steps", [])
+    if steps:
+        st.dataframe(
+            [
+                {
+                    "Step": STEP_LABELS.get(step.get("name", ""), step.get("name", "")),
+                    "Status": step.get("status", ""),
+                    "Latency ms": step.get("latency_ms") or "",
+                    "Calls": step.get("usage", {}).get("call_count", 0),
+                    "Tokens": step.get("usage", {}).get("total_tokens", ""),
+                    "Cost USD": step.get("usage", {}).get("estimated_cost_usd", ""),
+                }
+                for step in steps
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    usage = job.get("usage", {})
+    usage_bits = []
+    if usage.get("call_count") is not None:
+        usage_bits.append(f"AI calls: {usage.get('call_count', 0)}")
+    if usage.get("total_tokens"):
+        usage_bits.append(f"Tokens: {usage['total_tokens']}")
+    if usage.get("estimated_cost_usd"):
+        usage_bits.append(f"Estimated cost: ${usage['estimated_cost_usd']}")
+    if usage_bits:
+        st.caption(" | ".join(usage_bits))
+
+
+def poll_session_job(status_url: str) -> dict[str, Any]:
+    placeholder = st.empty()
+    job = get_session_job(status_url)
+    with placeholder.container():
+        show_job_progress(job)
+
+    while job.get("status") not in TERMINAL_JOB_STATUSES:
+        time.sleep(1.25)
+        job = get_session_job(status_url)
+        placeholder.empty()
+        with placeholder.container():
+            show_job_progress(job)
+
+    return job
 
 
 def show_skill_list(title: str, items: list[dict[str, Any]]) -> None:
@@ -448,25 +521,42 @@ if run:
     elif len(job_description.strip()) < 50:
         st.error("Please paste a fuller job description.")
     else:
-        with st.spinner("Running the interview copilot workflow..."):
+        st.session_state.pop("active_session", None)
+        st.session_state.pop("active_job", None)
+        with st.status("Starting background workflow...", expanded=True) as job_status:
             try:
-                st.session_state["active_session"] = create_session(
+                job_create = create_session_job(
                     resume_file,
                     job_description.strip(),
                     selected_role,
                     selected_output_language,
                     demo_mode,
                 )
-                if st.session_state["active_session"].get("demo_mode"):
-                    st.success("Demo preview generated. It was not saved to session history.")
+                job_status.update(label=f"Queued job {job_create['job_id'][:8]}", state="running")
+                job = poll_session_job(job_create["status_url"])
+                st.session_state["active_job"] = job
+
+                if job.get("status") == "succeeded" and job.get("result"):
+                    st.session_state["active_session"] = job["result"]
+                    job_status.update(label="Background workflow completed.", state="complete")
+                    if job["result"].get("demo_mode"):
+                        st.success("Demo preview generated by background job. It was not saved to session history.")
+                    else:
+                        st.success("Session generated and saved by background job.")
                 else:
-                    st.success("Session generated and saved.")
+                    error = job.get("error") or {}
+                    job_status.update(label="Background workflow failed.", state="error")
+                    st.error(error.get("message", "The background workflow failed."))
+                    if error.get("action"):
+                        st.info(error["action"])
             except requests.HTTPError as exc:
+                job_status.update(label="Request failed.", state="error")
                 message, action = friendly_api_error(exc)
                 st.error(message)
                 if action:
                     st.info(action)
             except requests.RequestException as exc:
+                job_status.update(label="Could not reach backend.", state="error")
                 st.error(f"Could not reach backend: {exc}")
 
 if "active_session" in st.session_state:

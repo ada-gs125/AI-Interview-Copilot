@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -131,3 +131,47 @@ class SessionSummary(BaseModel):
     overall_fit_score: int
     role_summary: str
     missing_skill_count: int
+
+
+JobStatus = Literal["queued", "running", "succeeded", "failed"]
+JobStepStatus = Literal["queued", "running", "succeeded", "failed"]
+
+
+class JobStep(BaseModel):
+    name: str
+    status: JobStepStatus
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    latency_ms: Optional[int] = None
+    error_message: Optional[str] = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+
+
+class JobError(BaseModel):
+    message: str
+    action: str
+    code: str
+
+
+class SessionJobCreateResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    status_url: str
+
+
+class SessionJobResponse(BaseModel):
+    id: str
+    status: JobStatus
+    created_at: str
+    updated_at: str
+    completed_at: Optional[str] = None
+    current_step: Optional[str] = None
+    progress_percent: int = Field(ge=0, le=100)
+    role_type: RoleType
+    output_language: OutputLanguage
+    demo_mode: bool = False
+    session_id: Optional[int] = None
+    error: Optional[JobError] = None
+    steps: list[JobStep] = Field(default_factory=list)
+    usage: dict[str, Any] = Field(default_factory=dict)
+    result: Optional[SessionResponse] = None

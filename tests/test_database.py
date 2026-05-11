@@ -15,6 +15,7 @@ from tests.factories import (
     sample_jd_analysis,
     sample_questions,
     sample_resume_match,
+    sample_session,
 )
 
 
@@ -79,3 +80,42 @@ def test_create_get_and_list_session_round_trip(postgres_database):
 
 def test_get_session_returns_none_for_missing_id(postgres_database):
     assert db.get_session(999_999) is None
+
+
+def test_create_update_and_get_session_job_round_trip(postgres_database):
+    job_id = f"job-{uuid4().hex}"
+    db.create_session_job(
+        job_id=job_id,
+        role_type="AI Engineer",
+        output_language="English",
+        demo_mode=True,
+    )
+
+    db.update_session_job(
+        job_id,
+        status="succeeded",
+        current_step="completed",
+        progress_percent=100,
+        steps=[
+            {
+                "name": "parse_resume",
+                "status": "succeeded",
+                "started_at": "2026-05-11T00:00:00+00:00",
+                "completed_at": "2026-05-11T00:00:01+00:00",
+                "latency_ms": 10,
+                "usage": {},
+            }
+        ],
+        usage={"call_count": 0, "calls": []},
+        result=sample_session(session_id=0),
+        completed=True,
+    )
+
+    loaded = db.get_session_job(job_id)
+
+    assert loaded is not None
+    assert loaded.status == "succeeded"
+    assert loaded.progress_percent == 100
+    assert loaded.steps[0].name == "parse_resume"
+    assert loaded.result is not None
+    assert loaded.result.demo_mode is False

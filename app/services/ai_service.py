@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from openai import OpenAI
 
@@ -25,6 +26,9 @@ class AIInterviewService:
             raise RuntimeError("OPENAI_API_KEY is not configured. Add it to .env before running AI workflows.")
         self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_model
+        self.input_cost_per_1m_tokens = settings.openai_input_cost_per_1m_tokens
+        self.output_cost_per_1m_tokens = settings.openai_output_cost_per_1m_tokens
+        self.usage_events: list[dict[str, Any]] = []
 
     def analyze_jd(
         self,
@@ -155,7 +159,43 @@ class AIInterviewService:
         parsed = response.output_parsed
         if parsed is None:
             raise RuntimeError("The model did not return a parseable structured response.")
+        self._record_usage(response, schema)
         return parsed
+
+    def usage_snapshot(self) -> list[dict[str, Any]]:
+        return list(getattr(self, "usage_events", []))
+
+    def _record_usage(self, response: Any, schema: type) -> None:
+        usage = getattr(response, "usage", None)
+        event: dict[str, Any] = {
+            "schema": schema.__name__,
+            "model": self.model,
+        }
+        if usage is not None:
+            input_tokens = getattr(usage, "input_tokens", None)
+            output_tokens = getattr(usage, "output_tokens", None)
+            event.update(
+                {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                }
+            )
+            estimated_cost = self._estimated_cost_usd(input_tokens, output_tokens)
+            if estimated_cost is not None:
+                event["estimated_cost_usd"] = estimated_cost
+        self.usage_events.append(event)
+
+    def _estimated_cost_usd(self, input_tokens: Any, output_tokens: Any) -> float | None:
+        if not isinstance(input_tokens, int) or not isinstance(output_tokens, int):
+            return None
+        if not self.input_cost_per_1m_tokens and not self.output_cost_per_1m_tokens:
+            return None
+        return round(
+            (input_tokens / 1_000_000 * self.input_cost_per_1m_tokens)
+            + (output_tokens / 1_000_000 * self.output_cost_per_1m_tokens),
+            6,
+        )
 
     def _language_instruction(
         self,

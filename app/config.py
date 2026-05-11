@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     app_name: str = "AI Interview Copilot"
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
+    openai_input_cost_per_1m_tokens: float = Field(default=0.0, alias="OPENAI_INPUT_COST_PER_1M_TOKENS")
+    openai_output_cost_per_1m_tokens: float = Field(default=0.0, alias="OPENAI_OUTPUT_COST_PER_1M_TOKENS")
     database_url: str = Field(
         default="postgresql://interview_copilot:interview_copilot@localhost:5432/interview_copilot",
         alias="DATABASE_URL",
