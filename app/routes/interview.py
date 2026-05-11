@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
@@ -325,14 +326,31 @@ def _run_session_job(
         update_session_job(job_id, status="running", progress_percent=1)
 
         resume_text = run_step("parse_resume", lambda: extract_resume_text(resume_pdf_bytes))
-        ai = _ai_service(effective_demo_mode)
-        jd_analysis = run_step(
-            "analyze_jd",
-            lambda: ai.analyze_jd(job_description, role_type, output_language),
+
+        # analyze_jd and match_resume are independent — run them in parallel
+        ai_jd = _ai_service(effective_demo_mode)
+        ai_match = _ai_service(effective_demo_mode)
+
+        analyze_step = {"name": "analyze_jd", "status": "running", "started_at": _now_iso(), "usage": {}}
+        match_step = {"name": "match_resume", "status": "running", "started_at": _now_iso(), "usage": {}}
+        steps.extend([analyze_step, match_step])
+        update_session_job(
+            job_id,
+            status="running",
+            current_step="analyze_jd",
+            progress_percent=max(1, WORKFLOW_STEPS["analyze_jd"] - 10),
+            steps=steps,
+            usage=_usage_summary(all_usage_events),
         )
-        resume_match = run_step(
-            "match_resume",
-            lambda: ai.match_resume(
+
+        def _do_analyze_jd():
+            t = perf_counter()
+            result = ai_jd.analyze_jd(job_description, role_type, output_language)
+            return result, int((perf_counter() - t) * 1000)
+
+        def _do_match_resume():
+            t = perf_counter()
+            result = ai_match.match_resume(
                 ResumeMatchRequest(
                     resume_text=resume_text,
                     job_description=job_description,
@@ -340,8 +358,57 @@ def _run_session_job(
                     output_language=output_language,
                     demo_mode=effective_demo_mode,
                 )
-            ),
+            )
+            return result, int((perf_counter() - t) * 1000)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            jd_future = executor.submit(_do_analyze_jd)
+            match_future = executor.submit(_do_match_resume)
+            jd_exc = jd_future.exception()
+            match_exc = match_future.exception()
+
+        if jd_exc or match_exc:
+            analyze_step.update({
+                "status": "failed" if jd_exc else "succeeded",
+                "completed_at": _now_iso(),
+                **({} if not jd_exc else {"error_message": str(jd_exc)}),
+            })
+            match_step.update({
+                "status": "failed" if match_exc else "succeeded",
+                "completed_at": _now_iso(),
+                **({} if not match_exc else {"error_message": str(match_exc)}),
+            })
+            raise (jd_exc or match_exc)
+
+        jd_analysis, jd_latency = jd_future.result()
+        resume_match, match_latency = match_future.result()
+
+        jd_usage = _usage_events(ai_jd)
+        match_usage = _usage_events(ai_match)
+        all_usage_events.extend(jd_usage)
+        all_usage_events.extend(match_usage)
+
+        analyze_step.update({
+            "status": "succeeded",
+            "completed_at": _now_iso(),
+            "latency_ms": jd_latency,
+            "usage": _usage_summary(jd_usage),
+        })
+        match_step.update({
+            "status": "succeeded",
+            "completed_at": _now_iso(),
+            "latency_ms": match_latency,
+            "usage": _usage_summary(match_usage),
+        })
+        update_session_job(
+            job_id,
+            current_step="match_resume",
+            progress_percent=WORKFLOW_STEPS["match_resume"],
+            steps=steps,
+            usage=_usage_summary(all_usage_events),
         )
+
+        ai = _ai_service(effective_demo_mode)
         questions = run_step(
             "generate_questions",
             lambda: ai.generate_questions(
