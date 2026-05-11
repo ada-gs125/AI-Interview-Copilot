@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.schemas import SessionJobResponse, SessionSummary, UserResponse
@@ -180,12 +181,13 @@ def test_create_session_from_upload_demo_mode_does_not_persist(monkeypatch):
     assert payload["answers"]["answers"][0]["category"] == "技术问题"
 
 
-def test_create_session_job_runs_background_workflow_and_returns_status(monkeypatch):
+@pytest.fixture
+def fake_session_job_store(monkeypatch):
     import app.routes.interview as interview_routes
 
     jobs = {}
 
-    def fake_create_session_job(*, job_id, user_id, role_type, output_language, demo_mode):
+    def fake_create(*, job_id, user_id, role_type, output_language, demo_mode):
         jobs[job_id] = {
             "id": job_id,
             "user_id": user_id,
@@ -206,23 +208,30 @@ def test_create_session_job_runs_background_workflow_and_returns_status(monkeypa
         }
         return job_id
 
-    def fake_update_session_job(job_id, **kwargs):
+    def fake_update(job_id, **kwargs):
         job = jobs[job_id]
         job.update({key: value for key, value in kwargs.items() if value is not None})
         if kwargs.get("completed"):
             job["completed_at"] = "2026-05-11T00:00:01+00:00"
         job["updated_at"] = "2026-05-11T00:00:01+00:00"
 
-    def fake_get_session_job(job_id, *, user_id):
+    def fake_get(job_id, *, user_id):
         job = jobs.get(job_id)
-        if job and job["user_id"] != user_id:
+        if job is None or job["user_id"] != user_id:
             return None
-        return SessionJobResponse.model_validate(job) if job else None
+        return SessionJobResponse.model_validate(job)
+
+    monkeypatch.setattr(interview_routes, "create_session_job", fake_create)
+    monkeypatch.setattr(interview_routes, "update_session_job", fake_update)
+    monkeypatch.setattr(interview_routes, "get_session_job", fake_get)
+
+    return jobs
+
+
+def test_create_session_job_runs_background_workflow_and_returns_status(monkeypatch, fake_session_job_store):
+    import app.routes.interview as interview_routes
 
     monkeypatch.setattr(interview_routes, "extract_resume_text", lambda _: RESUME_TEXT)
-    monkeypatch.setattr(interview_routes, "create_session_job", fake_create_session_job)
-    monkeypatch.setattr(interview_routes, "update_session_job", fake_update_session_job)
-    monkeypatch.setattr(interview_routes, "get_session_job", fake_get_session_job)
 
     with _client_without_startup_db(monkeypatch) as client:
         create_response = client.post(
@@ -255,49 +264,7 @@ def test_create_session_job_runs_background_workflow_and_returns_status(monkeypa
     assert payload["result"]["demo_mode"] is True
 
 
-def test_create_session_job_records_pdf_parse_failure(monkeypatch):
-    import app.routes.interview as interview_routes
-
-    jobs = {}
-
-    def fake_create_session_job(*, job_id, user_id, role_type, output_language, demo_mode):
-        jobs[job_id] = {
-            "id": job_id,
-            "user_id": user_id,
-            "status": "queued",
-            "created_at": "2026-05-11T00:00:00+00:00",
-            "updated_at": "2026-05-11T00:00:00+00:00",
-            "completed_at": None,
-            "current_step": None,
-            "progress_percent": 0,
-            "role_type": role_type,
-            "output_language": output_language,
-            "demo_mode": demo_mode,
-            "session_id": None,
-            "error": None,
-            "steps": [],
-            "usage": {},
-            "result": None,
-        }
-        return job_id
-
-    def fake_update_session_job(job_id, **kwargs):
-        job = jobs[job_id]
-        job.update({key: value for key, value in kwargs.items() if value is not None})
-        if kwargs.get("completed"):
-            job["completed_at"] = "2026-05-11T00:00:01+00:00"
-        job["updated_at"] = "2026-05-11T00:00:01+00:00"
-
-    def fake_get_session_job(job_id, *, user_id):
-        job = jobs.get(job_id)
-        if job and job["user_id"] != user_id:
-            return None
-        return SessionJobResponse.model_validate(job) if job else None
-
-    monkeypatch.setattr(interview_routes, "create_session_job", fake_create_session_job)
-    monkeypatch.setattr(interview_routes, "update_session_job", fake_update_session_job)
-    monkeypatch.setattr(interview_routes, "get_session_job", fake_get_session_job)
-
+def test_create_session_job_records_pdf_parse_failure(monkeypatch, fake_session_job_store):
     with _client_without_startup_db(monkeypatch) as client:
         create_response = client.post(
             "/sessions/jobs",
@@ -390,3 +357,55 @@ def test_delete_session_is_scoped_to_current_user(monkeypatch):
     assert ok_response.status_code == 204
     assert missing_response.status_code == 404
     assert deleted == [(42, 1), (43, 1)]
+
+
+def test_auth_me_returns_current_user(monkeypatch):
+    with _client_without_startup_db(monkeypatch, user_id=5) as client:
+        response = client.get("/auth/me")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == 5
+    assert response.json()["email"] == "user5@example.com"
+
+
+def test_register_rejects_duplicate_email(monkeypatch):
+    import app.routes.auth as auth_routes
+
+    def raise_duplicate(*, email, password):
+        raise ValueError("A user with this email already exists.")
+
+    monkeypatch.setattr(auth_routes, "create_user", raise_duplicate)
+
+    with _client_without_startup_db(monkeypatch, authenticated=False) as client:
+        response = client.post(
+            "/auth/register",
+            json={"email": "existing@example.com", "password": "password123"},
+        )
+
+    assert response.status_code == 409
+
+
+def test_session_job_is_scoped_to_owner(monkeypatch, fake_session_job_store):
+    import app.routes.interview as interview_routes
+
+    monkeypatch.setattr(interview_routes, "extract_resume_text", lambda _: RESUME_TEXT)
+
+    with _client_without_startup_db(monkeypatch, user_id=1) as client:
+        create_response = client.post(
+            "/sessions/jobs",
+            data={
+                "job_description": ENGLISH_JD,
+                "role_type": "AI Engineer",
+                "output_language": "English",
+                "demo_mode": "true",
+            },
+            files={"resume_pdf": ("resume.pdf", b"%PDF demo", "application/pdf")},
+        )
+        job_id = create_response.json()["job_id"]
+        owner_response = client.get(f"/sessions/jobs/{job_id}")
+
+    with _client_without_startup_db(monkeypatch, user_id=2) as client:
+        other_response = client.get(f"/sessions/jobs/{job_id}")
+
+    assert owner_response.status_code == 200
+    assert other_response.status_code == 404

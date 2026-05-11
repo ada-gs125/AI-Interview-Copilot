@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.auth_service import create_access_token, decode_access_token, hash_password, normalize_email, verify_password
 
 
@@ -33,12 +35,8 @@ def test_access_token_rejects_wrong_secret():
         expires_minutes=10,
     )
 
-    try:
+    with pytest.raises(ValueError, match="signature"):
         decode_access_token(token, "different-secret")
-    except ValueError as exc:
-        assert "signature" in str(exc)
-    else:
-        raise AssertionError("Expected token decoding to fail.")
 
 
 def test_expired_access_token_is_rejected():
@@ -49,12 +47,8 @@ def test_expired_access_token_is_rejected():
         expires_minutes=-1,
     )
 
-    try:
+    with pytest.raises(ValueError, match="expired"):
         decode_access_token(token, "secret")
-    except ValueError as exc:
-        assert "expired" in str(exc)
-    else:
-        raise AssertionError("Expected expired token decoding to fail.")
 
 
 def test_normalize_email_strips_and_lowercases():

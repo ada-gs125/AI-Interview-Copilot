@@ -131,6 +131,21 @@ def test_api_delete_sends_auth_header(monkeypatch):
     assert calls == [("https://api.example.test/sessions/42", {"Authorization": "Bearer token-123"}, 30)]
 
 
+def test_api_get_sends_auth_header(monkeypatch):
+    calls = []
+
+    def fake_get(url, *, headers, timeout):
+        calls.append((url, headers, timeout))
+        return DummyResponse({"id": 42, "role_type": "AI Engineer"})
+
+    monkeypatch.setattr(api_client.requests, "get", fake_get)
+
+    payload = api_client.api_get("https://api.example.test", "/sessions/42", "token-123")
+
+    assert payload == {"id": 42, "role_type": "AI Engineer"}
+    assert calls == [("https://api.example.test/sessions/42", {"Authorization": "Bearer token-123"}, 30)]
+
+
 def test_fallback_to_sync_only_for_missing_job_api():
     missing = requests.HTTPError("missing")
     missing.response = DummyResponse(status_code=404)
