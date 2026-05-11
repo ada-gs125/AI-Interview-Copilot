@@ -21,6 +21,9 @@ from app.services.report_export import (
 )
 
 
+DEFAULT_API_BASE_URL = "https://backend-production-b0243.up.railway.app"
+
+
 def get_api_base_url() -> str:
     try:
         configured_url = st.secrets.get("API_BASE_URL")
@@ -28,7 +31,7 @@ def get_api_base_url() -> str:
         configured_url = None
 
     if not configured_url:
-        configured_url = os.getenv("API_BASE_URL", "http://localhost:8000")
+        configured_url = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL)
 
     return str(configured_url).rstrip("/")
 
