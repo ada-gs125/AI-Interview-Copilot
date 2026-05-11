@@ -80,6 +80,19 @@ streamlit run app/frontend/streamlit_app.py
 
 Open Streamlit at `http://localhost:8501`.
 
+To run only the local Streamlit frontend against the deployed Railway backend, create
+`.streamlit/secrets.toml` from `.streamlit/secrets.toml.example`, or set:
+
+```toml
+API_BASE_URL = "https://backend-production-b0243.up.railway.app"
+```
+
+Then start the frontend:
+
+```bash
+make frontend
+```
+
 The backend creates the PostgreSQL `sessions` table on startup.
 
 The frontend supports three output language modes:
@@ -104,6 +117,24 @@ The full session workflow batches answer generation into one OpenAI call instead
 - `GET /sessions/{session_id}`
 
 FastAPI docs are available at `http://localhost:8000/docs`.
+
+## Deploy Streamlit Frontend
+
+The FastAPI backend is already deployed on Railway. Deploy the Streamlit frontend on
+Streamlit Community Cloud with these settings:
+
+- Repository: this GitHub repository
+- Branch: `main`
+- Main file path: `app/frontend/streamlit_app.py`
+- Python version: `3.11`
+- Secrets:
+
+```toml
+API_BASE_URL = "https://backend-production-b0243.up.railway.app"
+```
+
+After deployment, the Streamlit app will call the Railway backend directly. Keep
+`.streamlit/secrets.toml` local only; it is ignored by git.
 
 ## Docker
 

@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
@@ -20,7 +21,19 @@ from app.services.report_export import (
 )
 
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
+def get_api_base_url() -> str:
+    try:
+        configured_url = st.secrets.get("API_BASE_URL")
+    except StreamlitSecretNotFoundError:
+        configured_url = None
+
+    if not configured_url:
+        configured_url = os.getenv("API_BASE_URL", "http://localhost:8000")
+
+    return str(configured_url).rstrip("/")
+
+
+API_BASE_URL = get_api_base_url()
 ROLE_TYPES = [
     "Backend Engineer",
     "AI Engineer",
