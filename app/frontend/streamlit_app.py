@@ -21,11 +21,14 @@ from app.services.report_export import (
     report_filename,
 )
 from app.frontend.api_client import (
+    api_delete,
     api_get,
     create_session_from_upload,
     create_session_job,
     friendly_api_error,
     get_session_job,
+    login_user,
+    register_user,
     should_fallback_to_sync,
 )
 
@@ -251,15 +254,15 @@ def show_job_progress(job: dict[str, Any]) -> None:
         st.caption(" | ".join(usage_bits))
 
 
-def poll_session_job(status_url: str) -> dict[str, Any]:
+def poll_session_job(status_url: str, access_token: str) -> dict[str, Any]:
     placeholder = st.empty()
-    job = get_session_job(API_BASE_URL, status_url)
+    job = get_session_job(API_BASE_URL, status_url, access_token)
     with placeholder.container():
         show_job_progress(job)
 
     while job.get("status") not in TERMINAL_JOB_STATUSES:
         time.sleep(1.25)
-        job = get_session_job(API_BASE_URL, status_url)
+        job = get_session_job(API_BASE_URL, status_url, access_token)
         placeholder.empty()
         with placeholder.container():
             show_job_progress(job)
@@ -328,6 +331,21 @@ def show_session(session: dict[str, Any]) -> None:
             help="Download PDF report",
         )
 
+    if session.get("id"):
+        if st.button("Delete session", use_container_width=False):
+            try:
+                api_delete(API_BASE_URL, f"/sessions/{session['id']}", st.session_state.get("access_token"))
+                st.session_state.pop("active_session", None)
+                st.success("Session deleted.")
+                st.rerun()
+            except requests.HTTPError as exc:
+                message, action = friendly_api_error(exc)
+                st.error(message)
+                if action:
+                    st.info(action)
+            except requests.RequestException as exc:
+                st.error(f"Could not reach backend: {exc}")
+
     if session.get("demo_mode"):
         st.info("Demo mode result: sample data was generated without OpenAI API calls.")
 
@@ -393,6 +411,53 @@ def show_session(session: dict[str, Any]) -> None:
 with st.sidebar:
     st.title("AI Interview Copilot")
     st.caption("Resume + JD -> interview strategy, questions, and grounded answers.")
+    access_token = st.session_state.get("access_token")
+    current_user = st.session_state.get("current_user")
+
+    if access_token and current_user:
+        st.caption(f"Signed in as {current_user.get('email', '')}")
+        if st.button("Sign out", use_container_width=True):
+            st.session_state.pop("access_token", None)
+            st.session_state.pop("current_user", None)
+            st.session_state.pop("active_session", None)
+            st.session_state.pop("active_job", None)
+            st.rerun()
+    else:
+        auth_tab, register_tab = st.tabs(["Sign in", "Create account"])
+        with auth_tab:
+            login_email = st.text_input("Email", key="login-email")
+            login_password = st.text_input("Password", type="password", key="login-password")
+            if st.button("Sign in", use_container_width=True):
+                try:
+                    auth = login_user(API_BASE_URL, login_email, login_password)
+                    st.session_state["access_token"] = auth["access_token"]
+                    st.session_state["current_user"] = auth["user"]
+                    st.rerun()
+                except requests.HTTPError as exc:
+                    message, action = friendly_api_error(exc)
+                    st.error(message)
+                    if action:
+                        st.info(action)
+                except requests.RequestException as exc:
+                    st.error(f"Could not reach backend: {exc}")
+        with register_tab:
+            register_email = st.text_input("Email", key="register-email")
+            register_password = st.text_input("Password", type="password", key="register-password")
+            if st.button("Create account", use_container_width=True):
+                try:
+                    auth = register_user(API_BASE_URL, register_email, register_password)
+                    st.session_state["access_token"] = auth["access_token"]
+                    st.session_state["current_user"] = auth["user"]
+                    st.rerun()
+                except requests.HTTPError as exc:
+                    message, action = friendly_api_error(exc)
+                    st.error(message)
+                    if action:
+                        st.info(action)
+                except requests.RequestException as exc:
+                    st.error(f"Could not reach backend: {exc}")
+
+    access_token = st.session_state.get("access_token")
     selected_role = st.selectbox("Target role type", ROLE_TYPES)
     selected_output_language = st.selectbox(
         "Output language",
@@ -407,15 +472,22 @@ with st.sidebar:
 
     st.divider()
     st.subheader("Saved sessions")
-    try:
-        summaries = api_get(API_BASE_URL, "/sessions")
-        for summary in summaries:
-            mode = " | demo" if summary.get("demo_mode") else ""
-            label = f"#{summary['id']} | {summary['role_type']} | {summary['overall_fit_score']}{mode}"
-            if st.button(label, key=f"session-{summary['id']}", use_container_width=True):
-                st.session_state["active_session"] = api_get(API_BASE_URL, f"/sessions/{summary['id']}")
-    except requests.RequestException:
-        st.caption("Start the FastAPI backend to load sessions.")
+    if access_token:
+        try:
+            summaries = api_get(API_BASE_URL, "/sessions", access_token)
+            for summary in summaries:
+                mode = " | demo" if summary.get("demo_mode") else ""
+                label = f"#{summary['id']} | {summary['role_type']} | {summary['overall_fit_score']}{mode}"
+                if st.button(label, key=f"session-{summary['id']}", use_container_width=True):
+                    st.session_state["active_session"] = api_get(
+                        API_BASE_URL,
+                        f"/sessions/{summary['id']}",
+                        access_token,
+                    )
+        except requests.RequestException:
+            st.caption("Start the FastAPI backend to load sessions.")
+    else:
+        st.caption("Sign in to load saved sessions.")
 
 
 st.title("Interview prep workspace")
@@ -423,6 +495,11 @@ st.markdown(
     '<p class="small-muted">Upload a PDF resume, paste a target JD, and generate a saved preparation session.</p>',
     unsafe_allow_html=True,
 )
+
+access_token = st.session_state.get("access_token")
+if not access_token:
+    st.info("Sign in or create an account to generate and save interview prep sessions.")
+    st.stop()
 
 left, right = st.columns([1.42, 0.58], gap="large")
 
@@ -491,6 +568,7 @@ if run:
                         selected_role,
                         selected_output_language,
                         demo_mode,
+                        access_token,
                     )
                 except requests.HTTPError as exc:
                     if not should_fallback_to_sync(exc):
@@ -506,6 +584,7 @@ if run:
                         selected_role,
                         selected_output_language,
                         demo_mode,
+                        access_token,
                     )
                     st.session_state["active_session"] = session
                     job_status.update(label="Compatibility workflow completed.", state="complete")
@@ -515,7 +594,7 @@ if run:
                         st.success("Session generated and saved.")
                 else:
                     job_status.update(label=f"Queued job {job_create['job_id'][:8]}", state="running")
-                    job = poll_session_job(job_create["status_url"])
+                    job = poll_session_job(job_create["status_url"], access_token)
                     st.session_state["active_job"] = job
 
                     if job.get("status") == "succeeded" and job.get("result"):

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Optional
 
 import psycopg
+from psycopg import errors
 from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
 
@@ -21,7 +22,9 @@ from app.schemas import (
     SessionJobResponse,
     SessionResponse,
     SessionSummary,
+    UserResponse,
 )
+from app.services.auth_service import hash_password, normalize_email, verify_password
 
 
 DEFAULT_OUTPUT_LANGUAGE: OutputLanguage = "Match job description language"
@@ -44,8 +47,25 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGSERIAL PRIMARY KEY,
+                email TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
+            ON users (lower(email))
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS sessions (
                 id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
                 created_at TIMESTAMPTZ NOT NULL,
                 role_type TEXT NOT NULL,
                 output_language TEXT NOT NULL DEFAULT 'Match job description language',
@@ -59,6 +79,7 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE CASCADE")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_sessions_created_at
@@ -67,8 +88,15 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE INDEX IF NOT EXISTS idx_sessions_user_created_at
+            ON sessions (user_id, created_at DESC)
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS session_jobs (
                 id TEXT PRIMARY KEY,
+                user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
                 status TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL,
@@ -86,6 +114,7 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute("ALTER TABLE session_jobs ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE CASCADE")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_session_jobs_created_at
@@ -98,10 +127,78 @@ def init_db() -> None:
             ON session_jobs (status)
             """
         )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_jobs_user_created_at
+            ON session_jobs (user_id, created_at DESC)
+            """
+        )
+
+
+def _row_to_user(row: DictRow) -> UserResponse:
+    return UserResponse(
+        id=row["id"],
+        email=row["email"],
+        created_at=_created_at_to_iso(row["created_at"]),
+    )
+
+
+def create_user(*, email: str, password: str) -> UserResponse:
+    normalized_email = normalize_email(email)
+    created_at = datetime.now(timezone.utc)
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                """
+                INSERT INTO users (email, password_hash, created_at)
+                VALUES (%s, %s, %s)
+                RETURNING id, email, created_at
+                """,
+                (normalized_email, hash_password(password), created_at),
+            ).fetchone()
+    except errors.UniqueViolation as exc:
+        raise ValueError("A user with this email already exists.") from exc
+    if row is None:
+        raise RuntimeError("PostgreSQL did not return a user.")
+    return _row_to_user(row)
+
+
+def get_user(user_id: int) -> Optional[UserResponse]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, email, created_at FROM users WHERE id = %s",
+            (user_id,),
+        ).fetchone()
+    return _row_to_user(row) if row else None
+
+
+def get_user_credentials_by_email(email: str) -> Optional[dict[str, Any]]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, email, password_hash, created_at
+            FROM users
+            WHERE lower(email) = lower(%s)
+            """,
+            (normalize_email(email),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def authenticate_user(*, email: str, password: str) -> Optional[UserResponse]:
+    row = get_user_credentials_by_email(email)
+    if row is None or not verify_password(password, row["password_hash"]):
+        return None
+    return UserResponse(
+        id=row["id"],
+        email=row["email"],
+        created_at=_created_at_to_iso(row["created_at"]),
+    )
 
 
 def create_session(
     *,
+    user_id: int,
     role_type: str,
     output_language: OutputLanguage,
     demo_mode: bool,
@@ -118,9 +215,9 @@ def create_session(
             """
             INSERT INTO sessions (
                 created_at, role_type, output_language, demo_mode, job_description, resume_text,
-                jd_analysis, resume_match, questions, answers
+                jd_analysis, resume_match, questions, answers, user_id
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -134,6 +231,7 @@ def create_session(
                 Jsonb(resume_match.model_dump(mode="json")),
                 Jsonb(questions.model_dump(mode="json")),
                 Jsonb(answers.model_dump(mode="json")),
+                user_id,
             ),
         ).fetchone()
         if row is None:
@@ -151,6 +249,7 @@ def _row_to_session(row: DictRow) -> SessionResponse:
     return SessionResponse(
         id=row["id"],
         created_at=_created_at_to_iso(row["created_at"]),
+        user_id=row["user_id"],
         role_type=row["role_type"],
         output_language=row["output_language"] or DEFAULT_OUTPUT_LANGUAGE,
         demo_mode=bool(row["demo_mode"]),
@@ -163,22 +262,26 @@ def _row_to_session(row: DictRow) -> SessionResponse:
     )
 
 
-def get_session(session_id: int) -> Optional[SessionResponse]:
+def get_session(session_id: int, *, user_id: int) -> Optional[SessionResponse]:
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM sessions WHERE id = %s", (session_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM sessions WHERE id = %s AND user_id = %s",
+            (session_id, user_id),
+        ).fetchone()
     return _row_to_session(row) if row else None
 
 
-def list_sessions(limit: int = 25) -> list[SessionSummary]:
+def list_sessions(*, user_id: int, limit: int = 25) -> list[SessionSummary]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT *
+            SELECT id, user_id, created_at, role_type, output_language, demo_mode, jd_analysis, resume_match
             FROM sessions
+            WHERE user_id = %s
             ORDER BY created_at DESC
             LIMIT %s
             """,
-            (limit,),
+            (user_id, limit),
         ).fetchall()
 
     summaries: list[SessionSummary] = []
@@ -189,6 +292,7 @@ def list_sessions(limit: int = 25) -> list[SessionSummary]:
             SessionSummary(
                 id=row["id"],
                 created_at=_created_at_to_iso(row["created_at"]),
+                user_id=row["user_id"],
                 role_type=row["role_type"],
                 output_language=row["output_language"] or DEFAULT_OUTPUT_LANGUAGE,
                 demo_mode=bool(row["demo_mode"]),
@@ -200,9 +304,37 @@ def list_sessions(limit: int = 25) -> list[SessionSummary]:
     return summaries
 
 
+def delete_session(session_id: int, *, user_id: int) -> bool:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            DELETE FROM sessions
+            WHERE id = %s AND user_id = %s
+            RETURNING id
+            """,
+            (session_id, user_id),
+        ).fetchone()
+    return row is not None
+
+
+def delete_expired_sessions(*, user_id: int, retention_days: int) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            DELETE FROM sessions
+            WHERE user_id = %s AND created_at < %s
+            RETURNING id
+            """,
+            (user_id, cutoff),
+        ).fetchall()
+    return len(rows)
+
+
 def create_session_job(
     *,
     job_id: str,
+    user_id: int,
     role_type: str,
     output_language: OutputLanguage,
     demo_mode: bool,
@@ -212,13 +344,14 @@ def create_session_job(
         conn.execute(
             """
             INSERT INTO session_jobs (
-                id, status, created_at, updated_at, role_type, output_language,
+                id, user_id, status, created_at, updated_at, role_type, output_language,
                 demo_mode, steps, usage
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 job_id,
+                user_id,
                 "queued",
                 now,
                 now,
@@ -302,6 +435,7 @@ def _row_to_job(row: DictRow) -> SessionJobResponse:
         role_type=row["role_type"],
         output_language=row["output_language"] or DEFAULT_OUTPUT_LANGUAGE,
         demo_mode=bool(row["demo_mode"]),
+        user_id=row["user_id"],
         session_id=row["session_id"],
         error=error,
         steps=[JobStep.model_validate(step) for step in row["steps"]],
@@ -310,7 +444,10 @@ def _row_to_job(row: DictRow) -> SessionJobResponse:
     )
 
 
-def get_session_job(job_id: str) -> Optional[SessionJobResponse]:
+def get_session_job(job_id: str, *, user_id: int) -> Optional[SessionJobResponse]:
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM session_jobs WHERE id = %s", (job_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM session_jobs WHERE id = %s AND user_id = %s",
+            (job_id, user_id),
+        ).fetchone()
     return _row_to_job(row) if row else None

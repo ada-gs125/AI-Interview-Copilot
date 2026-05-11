@@ -52,7 +52,9 @@ def postgres_database(monkeypatch):
 
 
 def test_create_get_and_list_session_round_trip(postgres_database):
+    user = db.create_user(email=f"user-{uuid4().hex}@example.com", password="password123")
     session_id = db.create_session(
+        user_id=user.id,
         role_type="AI Engineer",
         output_language="English",
         demo_mode=False,
@@ -64,28 +66,33 @@ def test_create_get_and_list_session_round_trip(postgres_database):
         answers=sample_answers(),
     )
 
-    loaded = db.get_session(session_id)
-    summaries = db.list_sessions()
+    loaded = db.get_session(session_id, user_id=user.id)
+    summaries = db.list_sessions(user_id=user.id)
 
     assert loaded is not None
     assert loaded.id == session_id
+    assert loaded.user_id == user.id
     assert loaded.created_at.endswith("+00:00")
     assert loaded.jd_analysis.required_technical_skills[0].name == "Python"
     assert loaded.resume_match.overall_fit_score == 82
     assert loaded.questions.technical_questions[0].difficulty == "hard"
     assert loaded.answers.answers[0].resume_evidence_used == ["Interview Copilot project"]
     assert summaries[0].id == session_id
+    assert summaries[0].user_id == user.id
     assert summaries[0].missing_skill_count == 1
 
 
 def test_get_session_returns_none_for_missing_id(postgres_database):
-    assert db.get_session(999_999) is None
+    user = db.create_user(email=f"user-{uuid4().hex}@example.com", password="password123")
+    assert db.get_session(999_999, user_id=user.id) is None
 
 
 def test_create_update_and_get_session_job_round_trip(postgres_database):
+    user = db.create_user(email=f"user-{uuid4().hex}@example.com", password="password123")
     job_id = f"job-{uuid4().hex}"
     db.create_session_job(
         job_id=job_id,
+        user_id=user.id,
         role_type="AI Engineer",
         output_language="English",
         demo_mode=True,
@@ -111,11 +118,39 @@ def test_create_update_and_get_session_job_round_trip(postgres_database):
         completed=True,
     )
 
-    loaded = db.get_session_job(job_id)
+    loaded = db.get_session_job(job_id, user_id=user.id)
 
     assert loaded is not None
     assert loaded.status == "succeeded"
+    assert loaded.user_id == user.id
     assert loaded.progress_percent == 100
     assert loaded.steps[0].name == "parse_resume"
     assert loaded.result is not None
     assert loaded.result.demo_mode is False
+
+
+def test_user_auth_and_session_isolation(postgres_database):
+    user_a = db.create_user(email=f"user-{uuid4().hex}@example.com", password="password123")
+    user_b = db.create_user(email=f"user-{uuid4().hex}@example.com", password="password123")
+
+    assert db.authenticate_user(email=user_a.email, password="password123") is not None
+    assert db.authenticate_user(email=user_a.email, password="wrong-password") is None
+
+    session_id = db.create_session(
+        user_id=user_a.id,
+        role_type="AI Engineer",
+        output_language="English",
+        demo_mode=False,
+        job_description=ENGLISH_JD,
+        resume_text=RESUME_TEXT,
+        jd_analysis=sample_jd_analysis(),
+        resume_match=sample_resume_match(),
+        questions=sample_questions(),
+        answers=sample_answers(),
+    )
+
+    assert db.get_session(session_id, user_id=user_a.id) is not None
+    assert db.get_session(session_id, user_id=user_b.id) is None
+    assert db.list_sessions(user_id=user_b.id) == []
+    assert db.delete_session(session_id, user_id=user_b.id) is False
+    assert db.delete_session(session_id, user_id=user_a.id) is True

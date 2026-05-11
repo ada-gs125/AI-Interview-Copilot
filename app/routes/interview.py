@@ -5,17 +5,20 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.config import get_settings
 from app.database import (
     create_session,
     create_session_job,
+    delete_expired_sessions,
+    delete_session,
     get_session,
     get_session_job,
     list_sessions,
     update_session_job,
 )
+from app.dependencies import current_user
 from app.schemas import (
     AnalyzeJDRequest,
     AnswerResult,
@@ -32,6 +35,7 @@ from app.schemas import (
     SessionJobResponse,
     SessionResponse,
     SessionSummary,
+    UserResponse,
 )
 from app.services.ai_service import AIInterviewService
 from app.services.mock_service import MockAIInterviewService
@@ -163,6 +167,7 @@ def _mark_failed_step(steps: list[dict[str, Any]], message: str) -> list[dict[st
 
 def _run_session_workflow(
     *,
+    user_id: int,
     resume_pdf_bytes: bytes,
     job_description: str,
     role_type: RoleType,
@@ -202,6 +207,7 @@ def _run_session_workflow(
     )
     return _persist_or_preview_session(
         effective_demo_mode=effective_demo_mode,
+        user_id=user_id,
         role_type=role_type,
         output_language=output_language,
         job_description=job_description,
@@ -216,6 +222,7 @@ def _run_session_workflow(
 def _persist_or_preview_session(
     *,
     effective_demo_mode: bool,
+    user_id: int,
     role_type: RoleType,
     output_language: OutputLanguage,
     job_description: str,
@@ -229,6 +236,7 @@ def _persist_or_preview_session(
         return SessionResponse(
             id=0,
             created_at=datetime.now(timezone.utc).isoformat(),
+            user_id=user_id,
             role_type=role_type,
             output_language=output_language,
             demo_mode=True,
@@ -242,6 +250,7 @@ def _persist_or_preview_session(
 
     session_id = create_session(
         role_type=role_type,
+        user_id=user_id,
         output_language=output_language,
         demo_mode=effective_demo_mode,
         job_description=job_description,
@@ -251,7 +260,7 @@ def _persist_or_preview_session(
         questions=questions,
         answers=answers,
     )
-    session = get_session(session_id)
+    session = get_session(session_id, user_id=user_id)
     if session is None:
         raise RuntimeError("Session was saved but could not be loaded.")
     return session
@@ -260,6 +269,7 @@ def _persist_or_preview_session(
 def _run_session_job(
     *,
     job_id: str,
+    user_id: int,
     resume_pdf_bytes: bytes,
     job_description: str,
     role_type: RoleType,
@@ -358,6 +368,7 @@ def _run_session_job(
             "save_session",
             lambda: _persist_or_preview_session(
                 effective_demo_mode=effective_demo_mode,
+                user_id=user_id,
                 role_type=role_type,
                 output_language=output_language,
                 job_description=job_description,
@@ -469,9 +480,11 @@ async def create_session_from_upload(
     role_type: RoleType = Form(...),
     output_language: OutputLanguage = Form("Match job description language"),
     demo_mode: bool = Form(False),
+    user: UserResponse = Depends(current_user),
 ) -> SessionResponse:
     try:
         return _run_session_workflow(
+            user_id=user.id,
             resume_pdf_bytes=await resume_pdf.read(),
             job_description=job_description,
             role_type=role_type,
@@ -496,11 +509,13 @@ async def create_session_job_from_upload(
     role_type: RoleType = Form(...),
     output_language: OutputLanguage = Form("Match job description language"),
     demo_mode: bool = Form(False),
+    user: UserResponse = Depends(current_user),
 ) -> SessionJobCreateResponse:
     job_id = str(uuid4())
     effective_demo_mode = _effective_demo_mode(demo_mode)
     create_session_job(
         job_id=job_id,
+        user_id=user.id,
         role_type=role_type,
         output_language=output_language,
         demo_mode=effective_demo_mode,
@@ -508,6 +523,7 @@ async def create_session_job_from_upload(
     background_tasks.add_task(
         _run_session_job,
         job_id=job_id,
+        user_id=user.id,
         resume_pdf_bytes=await resume_pdf.read(),
         job_description=job_description,
         role_type=role_type,
@@ -522,21 +538,29 @@ async def create_session_job_from_upload(
 
 
 @router.get("/sessions", response_model=list[SessionSummary])
-def sessions() -> list[SessionSummary]:
-    return list_sessions()
+def sessions(user: UserResponse = Depends(current_user)) -> list[SessionSummary]:
+    delete_expired_sessions(user_id=user.id, retention_days=get_settings().session_retention_days)
+    return list_sessions(user_id=user.id)
 
 
 @router.get("/sessions/jobs/{job_id}", response_model=SessionJobResponse)
-def session_job_detail(job_id: str) -> SessionJobResponse:
-    job = get_session_job(job_id)
+def session_job_detail(job_id: str, user: UserResponse = Depends(current_user)) -> SessionJobResponse:
+    job = get_session_job(job_id, user_id=user.id)
     if job is None:
         raise HTTPException(status_code=404, detail="Session job not found.")
     return job
 
 
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
-def session_detail(session_id: int) -> SessionResponse:
-    session = get_session(session_id)
+def session_detail(session_id: int, user: UserResponse = Depends(current_user)) -> SessionResponse:
+    session = get_session(session_id, user_id=user.id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found.")
     return session
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session_detail(session_id: int, user: UserResponse = Depends(current_user)) -> None:
+    deleted = delete_session(session_id, user_id=user.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found.")

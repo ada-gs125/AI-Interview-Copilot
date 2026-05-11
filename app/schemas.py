@@ -15,6 +15,28 @@ RoleType = Literal[
 OutputLanguage = Literal["English", "Chinese", "Match job description language"]
 
 
+class UserCreateRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserLoginRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    created_at: str
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
 class AnalyzeJDRequest(BaseModel):
     job_description: str = Field(min_length=50)
     role_type: RoleType
@@ -111,6 +133,7 @@ class AnswerSet(BaseModel):
 class SessionResponse(BaseModel):
     id: int
     created_at: str
+    user_id: Optional[int] = None
     role_type: RoleType
     output_language: OutputLanguage
     demo_mode: bool = False
@@ -125,6 +148,7 @@ class SessionResponse(BaseModel):
 class SessionSummary(BaseModel):
     id: int
     created_at: str
+    user_id: Optional[int] = None
     role_type: RoleType
     output_language: OutputLanguage
     demo_mode: bool = False
@@ -170,6 +194,7 @@ class SessionJobResponse(BaseModel):
     role_type: RoleType
     output_language: OutputLanguage
     demo_mode: bool = False
+    user_id: Optional[int] = None
     session_id: Optional[int] = None
     error: Optional[JobError] = None
     steps: list[JobStep] = Field(default_factory=list)

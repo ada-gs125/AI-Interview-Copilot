@@ -34,8 +34,8 @@ class DummyResponse:
 def test_create_session_job_posts_to_job_endpoint(monkeypatch):
     calls = []
 
-    def fake_post(url, *, files, data, timeout):
-        calls.append((url, files, data, timeout))
+    def fake_post(url, *, files, data, headers, timeout):
+        calls.append((url, files, data, headers, timeout))
         return DummyResponse({"job_id": "job-123", "status_url": "/sessions/jobs/job-123"})
 
     monkeypatch.setattr(api_client.requests, "post", fake_post)
@@ -47,21 +47,23 @@ def test_create_session_job_posts_to_job_endpoint(monkeypatch):
         "AI Engineer",
         "English",
         True,
+        "token-123",
     )
 
     assert payload["job_id"] == "job-123"
-    url, files, data, timeout = calls[0]
+    url, files, data, headers, timeout = calls[0]
     assert url == "https://api.example.test/sessions/jobs"
     assert files["resume_pdf"][0] == "resume.pdf"
     assert data["demo_mode"] is True
+    assert headers == {"Authorization": "Bearer token-123"}
     assert timeout == 30
 
 
 def test_create_session_from_upload_posts_to_sync_endpoint(monkeypatch):
     calls = []
 
-    def fake_post(url, *, files, data, timeout):
-        calls.append((url, files, data, timeout))
+    def fake_post(url, *, files, data, headers, timeout):
+        calls.append((url, files, data, headers, timeout))
         return DummyResponse({"id": 0, "demo_mode": True})
 
     monkeypatch.setattr(api_client.requests, "post", fake_post)
@@ -73,22 +75,60 @@ def test_create_session_from_upload_posts_to_sync_endpoint(monkeypatch):
         "AI Engineer",
         "English",
         True,
+        "token-123",
     )
 
     assert payload["demo_mode"] is True
     assert calls[0][0] == "https://api.example.test/sessions/from-upload"
-    assert calls[0][3] == 240
+    assert calls[0][3] == {"Authorization": "Bearer token-123"}
+    assert calls[0][4] == 240
 
 
 def test_get_session_job_uses_status_url(monkeypatch):
-    def fake_get(url, *, timeout):
+    def fake_get(url, *, headers, timeout):
         assert url == "https://api.example.test/sessions/jobs/job-123"
+        assert headers == {"Authorization": "Bearer token-123"}
         assert timeout == 30
         return DummyResponse({"id": "job-123", "status": "succeeded"})
 
     monkeypatch.setattr(api_client.requests, "get", fake_get)
 
-    assert api_client.get_session_job("https://api.example.test", "/sessions/jobs/job-123")["status"] == "succeeded"
+    assert (
+        api_client.get_session_job("https://api.example.test", "/sessions/jobs/job-123", "token-123")["status"]
+        == "succeeded"
+    )
+
+
+def test_auth_endpoints_send_json(monkeypatch):
+    calls = []
+
+    def fake_post(url, *, json, timeout):
+        calls.append((url, json, timeout))
+        return DummyResponse({"access_token": "token-123", "user": {"email": json["email"]}})
+
+    monkeypatch.setattr(api_client.requests, "post", fake_post)
+
+    register_payload = api_client.register_user("https://api.example.test", "user@example.com", "password123")
+    login_payload = api_client.login_user("https://api.example.test", "user@example.com", "password123")
+
+    assert register_payload["access_token"] == "token-123"
+    assert login_payload["access_token"] == "token-123"
+    assert calls[0][0] == "https://api.example.test/auth/register"
+    assert calls[1][0] == "https://api.example.test/auth/login"
+
+
+def test_api_delete_sends_auth_header(monkeypatch):
+    calls = []
+
+    def fake_delete(url, *, headers, timeout):
+        calls.append((url, headers, timeout))
+        return DummyResponse(status_code=204)
+
+    monkeypatch.setattr(api_client.requests, "delete", fake_delete)
+
+    api_client.api_delete("https://api.example.test", "/sessions/42", "token-123")
+
+    assert calls == [("https://api.example.test/sessions/42", {"Authorization": "Bearer token-123"}, 30)]
 
 
 def test_fallback_to_sync_only_for_missing_job_api():

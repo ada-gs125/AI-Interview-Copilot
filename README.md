@@ -50,6 +50,9 @@ OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4.1-mini
 OPENAI_INPUT_COST_PER_1M_TOKENS=0
 OPENAI_OUTPUT_COST_PER_1M_TOKENS=0
+AUTH_SECRET_KEY=replace-with-a-long-random-secret
+ACCESS_TOKEN_EXPIRE_MINUTES=10080
+SESSION_RETENTION_DAYS=30
 DATABASE_URL=postgresql://interview_copilot:interview_copilot@localhost:5432/interview_copilot
 ```
 
@@ -108,6 +111,8 @@ Turn on `Demo mode` in the sidebar to generate sample analysis without OpenAI AP
 
 The full session workflow batches answer generation into one OpenAI call instead of calling the model once per question.
 
+Users must sign in before creating or viewing saved interview sessions. Session and job records are scoped by `user_id`; list/detail/delete endpoints only return data owned by the authenticated user. The app prunes expired sessions for the current user when loading saved sessions, using `SESSION_RETENTION_DAYS`.
+
 ## Branch Workflow
 
 - `main` is connected to the Railway production backend. Pushing to `main` can trigger a production deployment.
@@ -117,6 +122,9 @@ The full session workflow batches answer generation into one OpenAI call instead
 ## API Endpoints
 
 - `GET /health`
+- `POST /auth/register`
+- `POST /auth/login`
+- `GET /auth/me`
 - `POST /analyze-jd`
 - `POST /match-resume`
 - `POST /generate-questions`
@@ -126,6 +134,7 @@ The full session workflow batches answer generation into one OpenAI call instead
 - `GET /sessions/jobs/{job_id}`
 - `GET /sessions`
 - `GET /sessions/{session_id}`
+- `DELETE /sessions/{session_id}`
 
 FastAPI docs are available at `http://localhost:8000/docs`.
 

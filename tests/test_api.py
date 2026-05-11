@@ -1,13 +1,22 @@
 from fastapi.testclient import TestClient
 
-from app.schemas import SessionJobResponse, SessionSummary
+from app.schemas import SessionJobResponse, SessionSummary, UserResponse
 from tests.factories import CHINESE_JD, ENGLISH_JD, RESUME_TEXT, sample_session
 
 
-def _client_without_startup_db(monkeypatch):
+def _client_without_startup_db(monkeypatch, *, authenticated: bool = True, user_id: int = 1):
     import app.main as main
+    import app.routes.interview as interview_routes
 
     monkeypatch.setattr(main, "init_db", lambda: None)
+    if authenticated:
+        main.app.dependency_overrides[interview_routes.current_user] = lambda: UserResponse(
+            id=user_id,
+            email=f"user{user_id}@example.com",
+            created_at="2026-05-11T00:00:00+00:00",
+        )
+    else:
+        main.app.dependency_overrides.pop(interview_routes.current_user, None)
     return TestClient(main.app)
 
 
@@ -17,6 +26,51 @@ def test_health_endpoint(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_register_and_login_return_access_tokens(monkeypatch):
+    import app.routes.auth as auth_routes
+
+    user = UserResponse(id=7, email="user@example.com", created_at="2026-05-11T00:00:00+00:00")
+    monkeypatch.setattr(auth_routes, "create_user", lambda *, email, password: user)
+    monkeypatch.setattr(auth_routes, "authenticate_user", lambda *, email, password: user)
+
+    with _client_without_startup_db(monkeypatch, authenticated=False) as client:
+        register_response = client.post(
+            "/auth/register",
+            json={"email": "user@example.com", "password": "password123"},
+        )
+        login_response = client.post(
+            "/auth/login",
+            json={"email": "user@example.com", "password": "password123"},
+        )
+
+    assert register_response.status_code == 201
+    assert register_response.json()["access_token"]
+    assert register_response.json()["user"]["email"] == "user@example.com"
+    assert login_response.status_code == 200
+    assert login_response.json()["access_token"]
+
+
+def test_login_rejects_bad_credentials(monkeypatch):
+    import app.routes.auth as auth_routes
+
+    monkeypatch.setattr(auth_routes, "authenticate_user", lambda *, email, password: None)
+
+    with _client_without_startup_db(monkeypatch, authenticated=False) as client:
+        response = client.post(
+            "/auth/login",
+            json={"email": "user@example.com", "password": "password123"},
+        )
+
+    assert response.status_code == 401
+
+
+def test_sessions_require_authentication(monkeypatch):
+    with _client_without_startup_db(monkeypatch, authenticated=False) as client:
+        response = client.get("/sessions")
+
+    assert response.status_code == 401
 
 
 def test_analyze_jd_uses_demo_service_without_openai_key(monkeypatch):
@@ -131,9 +185,10 @@ def test_create_session_job_runs_background_workflow_and_returns_status(monkeypa
 
     jobs = {}
 
-    def fake_create_session_job(*, job_id, role_type, output_language, demo_mode):
+    def fake_create_session_job(*, job_id, user_id, role_type, output_language, demo_mode):
         jobs[job_id] = {
             "id": job_id,
+            "user_id": user_id,
             "status": "queued",
             "created_at": "2026-05-11T00:00:00+00:00",
             "updated_at": "2026-05-11T00:00:00+00:00",
@@ -158,8 +213,10 @@ def test_create_session_job_runs_background_workflow_and_returns_status(monkeypa
             job["completed_at"] = "2026-05-11T00:00:01+00:00"
         job["updated_at"] = "2026-05-11T00:00:01+00:00"
 
-    def fake_get_session_job(job_id):
+    def fake_get_session_job(job_id, *, user_id):
         job = jobs.get(job_id)
+        if job and job["user_id"] != user_id:
+            return None
         return SessionJobResponse.model_validate(job) if job else None
 
     monkeypatch.setattr(interview_routes, "extract_resume_text", lambda _: RESUME_TEXT)
@@ -203,9 +260,10 @@ def test_create_session_job_records_pdf_parse_failure(monkeypatch):
 
     jobs = {}
 
-    def fake_create_session_job(*, job_id, role_type, output_language, demo_mode):
+    def fake_create_session_job(*, job_id, user_id, role_type, output_language, demo_mode):
         jobs[job_id] = {
             "id": job_id,
+            "user_id": user_id,
             "status": "queued",
             "created_at": "2026-05-11T00:00:00+00:00",
             "updated_at": "2026-05-11T00:00:00+00:00",
@@ -230,8 +288,10 @@ def test_create_session_job_records_pdf_parse_failure(monkeypatch):
             job["completed_at"] = "2026-05-11T00:00:01+00:00"
         job["updated_at"] = "2026-05-11T00:00:01+00:00"
 
-    def fake_get_session_job(job_id):
+    def fake_get_session_job(job_id, *, user_id):
         job = jobs.get(job_id)
+        if job and job["user_id"] != user_id:
+            return None
         return SessionJobResponse.model_validate(job) if job else None
 
     monkeypatch.setattr(interview_routes, "create_session_job", fake_create_session_job)
@@ -263,7 +323,7 @@ def test_create_session_job_records_pdf_parse_failure(monkeypatch):
 def test_session_job_detail_returns_404_for_missing_job(monkeypatch):
     import app.routes.interview as interview_routes
 
-    monkeypatch.setattr(interview_routes, "get_session_job", lambda job_id: None)
+    monkeypatch.setattr(interview_routes, "get_session_job", lambda job_id, *, user_id: None)
     with _client_without_startup_db(monkeypatch) as client:
         response = client.get("/sessions/jobs/missing")
 
@@ -292,8 +352,13 @@ def test_sessions_endpoints_return_summaries_and_detail(monkeypatch):
         role_summary=session.jd_analysis.role_summary,
         missing_skill_count=len(session.resume_match.missing_skills),
     )
-    monkeypatch.setattr(interview_routes, "list_sessions", lambda: [summary])
-    monkeypatch.setattr(interview_routes, "get_session", lambda session_id: session if session_id == 42 else None)
+    monkeypatch.setattr(interview_routes, "delete_expired_sessions", lambda *, user_id, retention_days: 0)
+    monkeypatch.setattr(interview_routes, "list_sessions", lambda *, user_id: [summary] if user_id == 1 else [])
+    monkeypatch.setattr(
+        interview_routes,
+        "get_session",
+        lambda session_id, *, user_id: session if session_id == 42 and user_id == 1 else None,
+    )
 
     with _client_without_startup_db(monkeypatch) as client:
         list_response = client.get("/sessions")
@@ -305,3 +370,23 @@ def test_sessions_endpoints_return_summaries_and_detail(monkeypatch):
     assert detail_response.status_code == 200
     assert detail_response.json()["job_description"] == ENGLISH_JD
     assert missing_response.status_code == 404
+
+
+def test_delete_session_is_scoped_to_current_user(monkeypatch):
+    import app.routes.interview as interview_routes
+
+    deleted = []
+
+    def fake_delete_session(session_id, *, user_id):
+        deleted.append((session_id, user_id))
+        return session_id == 42 and user_id == 1
+
+    monkeypatch.setattr(interview_routes, "delete_session", fake_delete_session)
+
+    with _client_without_startup_db(monkeypatch, user_id=1) as client:
+        ok_response = client.delete("/sessions/42")
+        missing_response = client.delete("/sessions/43")
+
+    assert ok_response.status_code == 204
+    assert missing_response.status_code == 404
+    assert deleted == [(42, 1), (43, 1)]

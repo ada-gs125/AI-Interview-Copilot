@@ -5,8 +5,37 @@ from typing import Any
 import requests
 
 
-def api_get(api_base_url: str, path: str) -> Any:
-    response = requests.get(f"{api_base_url}{path}", timeout=30)
+def auth_headers(access_token: str | None) -> dict[str, str]:
+    return {"Authorization": f"Bearer {access_token}"} if access_token else {}
+
+
+def api_get(api_base_url: str, path: str, access_token: str | None = None) -> Any:
+    response = requests.get(f"{api_base_url}{path}", headers=auth_headers(access_token), timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+def api_delete(api_base_url: str, path: str, access_token: str | None = None) -> None:
+    response = requests.delete(f"{api_base_url}{path}", headers=auth_headers(access_token), timeout=30)
+    response.raise_for_status()
+
+
+def register_user(api_base_url: str, email: str, password: str) -> dict[str, Any]:
+    response = requests.post(
+        f"{api_base_url}/auth/register",
+        json={"email": email, "password": password},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def login_user(api_base_url: str, email: str, password: str) -> dict[str, Any]:
+    response = requests.post(
+        f"{api_base_url}/auth/login",
+        json={"email": email, "password": password},
+        timeout=30,
+    )
     response.raise_for_status()
     return response.json()
 
@@ -35,6 +64,7 @@ def create_session_job(
     role_type: str,
     output_language: str,
     demo_mode: bool,
+    access_token: str | None = None,
 ) -> dict[str, Any]:
     files, data = _upload_payload(
         resume_file,
@@ -47,6 +77,7 @@ def create_session_job(
         f"{api_base_url}/sessions/jobs",
         files=files,
         data=data,
+        headers=auth_headers(access_token),
         timeout=30,
     )
     response.raise_for_status()
@@ -60,6 +91,7 @@ def create_session_from_upload(
     role_type: str,
     output_language: str,
     demo_mode: bool,
+    access_token: str | None = None,
 ) -> dict[str, Any]:
     files, data = _upload_payload(
         resume_file,
@@ -72,14 +104,15 @@ def create_session_from_upload(
         f"{api_base_url}/sessions/from-upload",
         files=files,
         data=data,
+        headers=auth_headers(access_token),
         timeout=240,
     )
     response.raise_for_status()
     return response.json()
 
 
-def get_session_job(api_base_url: str, status_url: str) -> dict[str, Any]:
-    return api_get(api_base_url, status_url)
+def get_session_job(api_base_url: str, status_url: str, access_token: str | None = None) -> dict[str, Any]:
+    return api_get(api_base_url, status_url, access_token)
 
 
 def should_fallback_to_sync(exc: requests.HTTPError) -> bool:
