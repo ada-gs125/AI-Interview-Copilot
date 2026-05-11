@@ -373,7 +373,6 @@ with st.sidebar:
         value=False,
         help="Use sample AI outputs without spending OpenAI API credits.",
     )
-    st.text_input("Backend API", value=API_BASE_URL, disabled=True)
 
     st.divider()
     st.subheader("Saved sessions")
