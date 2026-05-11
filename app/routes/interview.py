@@ -415,7 +415,7 @@ def _run_session_job(
 
 
 @router.post("/analyze-jd", response_model=JDAnalysis)
-def analyze_jd(request: AnalyzeJDRequest) -> JDAnalysis:
+def analyze_jd(request: AnalyzeJDRequest, user: UserResponse = Depends(current_user)) -> JDAnalysis:
     try:
         effective_demo_mode = _effective_demo_mode(request.demo_mode)
         return _ai_service(effective_demo_mode).analyze_jd(
@@ -434,6 +434,7 @@ async def match_resume(
     role_type: RoleType = Form(...),
     output_language: OutputLanguage = Form("Match job description language"),
     demo_mode: bool = Form(False),
+    user: UserResponse = Depends(current_user),
 ) -> ResumeMatch:
     try:
         effective_demo_mode = _effective_demo_mode(demo_mode)
@@ -454,7 +455,7 @@ async def match_resume(
 
 
 @router.post("/generate-questions", response_model=QuestionSet)
-def generate_questions(request: GenerateQuestionsRequest) -> QuestionSet:
+def generate_questions(request: GenerateQuestionsRequest, user: UserResponse = Depends(current_user)) -> QuestionSet:
     try:
         effective_demo_mode = _effective_demo_mode(request.demo_mode)
         request.demo_mode = effective_demo_mode
@@ -464,7 +465,7 @@ def generate_questions(request: GenerateQuestionsRequest) -> QuestionSet:
 
 
 @router.post("/generate-answer", response_model=AnswerResult)
-def generate_answer(request: GenerateAnswerRequest) -> AnswerResult:
+def generate_answer(request: GenerateAnswerRequest, user: UserResponse = Depends(current_user)) -> AnswerResult:
     try:
         effective_demo_mode = _effective_demo_mode(request.demo_mode)
         request.demo_mode = effective_demo_mode

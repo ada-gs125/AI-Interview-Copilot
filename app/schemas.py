@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 RoleType = Literal[
@@ -16,12 +16,12 @@ OutputLanguage = Literal["English", "Chinese", "Match job description language"]
 
 
 class UserCreateRequest(BaseModel):
-    email: str = Field(min_length=5, max_length=255)
+    email: EmailStr
     password: str = Field(min_length=8, max_length=128)
 
 
 class UserLoginRequest(BaseModel):
-    email: str = Field(min_length=5, max_length=255)
+    email: EmailStr
     password: str = Field(min_length=8, max_length=128)
 
 
