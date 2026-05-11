@@ -1,4 +1,4 @@
-from app.schemas import GenerateQuestionsRequest, JDAnalysis, ResumeMatchRequest, SkillItem
+from app.schemas import GenerateQuestionsRequest, JDAnalysis, ResumeMatchRequest, SessionJobResponse, SkillItem
 from app.services.mock_service import MockAIInterviewService
 
 
@@ -115,3 +115,39 @@ def test_mock_batch_answers_use_chinese_categories_when_matching_chinese_jd():
     categories = {answer.category for answer in answers.answers}
     assert "技术问题" in categories
     assert "Technical" not in categories
+
+
+def test_session_job_response_accepts_progress_steps_and_error():
+    job = SessionJobResponse(
+        id="job-123",
+        status="failed",
+        created_at="2026-05-11T00:00:00+00:00",
+        updated_at="2026-05-11T00:00:01+00:00",
+        completed_at="2026-05-11T00:00:01+00:00",
+        current_step="parse_resume",
+        progress_percent=15,
+        role_type="AI Engineer",
+        output_language="English",
+        demo_mode=True,
+        error={
+            "message": "Could not extract enough text from the PDF resume.",
+            "action": "Upload a text-based PDF resume.",
+            "code": "pdf_parse_error",
+        },
+        steps=[
+            {
+                "name": "parse_resume",
+                "status": "failed",
+                "started_at": "2026-05-11T00:00:00+00:00",
+                "completed_at": "2026-05-11T00:00:01+00:00",
+                "latency_ms": 10,
+                "usage": {"call_count": 0},
+            }
+        ],
+        usage={"call_count": 0},
+    )
+
+    assert job.status == "failed"
+    assert job.error is not None
+    assert job.error.code == "pdf_parse_error"
+    assert job.steps[0].latency_ms == 10

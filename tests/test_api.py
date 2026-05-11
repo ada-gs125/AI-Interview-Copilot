@@ -61,6 +61,48 @@ def test_generate_answer_matches_chinese_jd_language_in_demo_mode(monkeypatch):
     assert "项目目标" in payload["concise_answer"]
 
 
+def test_match_resume_accepts_pdf_upload_in_demo_mode(monkeypatch):
+    import app.routes.interview as interview_routes
+
+    monkeypatch.setattr(interview_routes, "extract_resume_text", lambda _: RESUME_TEXT)
+    with _client_without_startup_db(monkeypatch) as client:
+        response = client.post(
+            "/match-resume",
+            data={
+                "job_description": ENGLISH_JD,
+                "role_type": "AI Engineer",
+                "output_language": "English",
+                "demo_mode": "true",
+            },
+            files={"resume_pdf": ("resume.pdf", b"%PDF demo", "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["overall_fit_score"] == 72
+    assert response.json()["strong_matches"]
+
+
+def test_generate_questions_endpoint_returns_all_categories(monkeypatch):
+    with _client_without_startup_db(monkeypatch) as client:
+        response = client.post(
+            "/generate-questions",
+            json={
+                "resume_text": RESUME_TEXT,
+                "job_description": ENGLISH_JD,
+                "role_type": "AI Engineer",
+                "output_language": "English",
+                "demo_mode": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["technical_questions"]
+    assert payload["project_deep_dive_questions"]
+    assert payload["system_design_questions"]
+    assert payload["behavioral_questions"]
+
+
 def test_create_session_from_upload_demo_mode_does_not_persist(monkeypatch):
     import app.routes.interview as interview_routes
 
@@ -154,6 +196,86 @@ def test_create_session_job_runs_background_workflow_and_returns_status(monkeypa
         "save_session",
     ]
     assert payload["result"]["demo_mode"] is True
+
+
+def test_create_session_job_records_pdf_parse_failure(monkeypatch):
+    import app.routes.interview as interview_routes
+
+    jobs = {}
+
+    def fake_create_session_job(*, job_id, role_type, output_language, demo_mode):
+        jobs[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "created_at": "2026-05-11T00:00:00+00:00",
+            "updated_at": "2026-05-11T00:00:00+00:00",
+            "completed_at": None,
+            "current_step": None,
+            "progress_percent": 0,
+            "role_type": role_type,
+            "output_language": output_language,
+            "demo_mode": demo_mode,
+            "session_id": None,
+            "error": None,
+            "steps": [],
+            "usage": {},
+            "result": None,
+        }
+        return job_id
+
+    def fake_update_session_job(job_id, **kwargs):
+        job = jobs[job_id]
+        job.update({key: value for key, value in kwargs.items() if value is not None})
+        if kwargs.get("completed"):
+            job["completed_at"] = "2026-05-11T00:00:01+00:00"
+        job["updated_at"] = "2026-05-11T00:00:01+00:00"
+
+    def fake_get_session_job(job_id):
+        job = jobs.get(job_id)
+        return SessionJobResponse.model_validate(job) if job else None
+
+    monkeypatch.setattr(interview_routes, "create_session_job", fake_create_session_job)
+    monkeypatch.setattr(interview_routes, "update_session_job", fake_update_session_job)
+    monkeypatch.setattr(interview_routes, "get_session_job", fake_get_session_job)
+
+    with _client_without_startup_db(monkeypatch) as client:
+        create_response = client.post(
+            "/sessions/jobs",
+            data={
+                "job_description": ENGLISH_JD,
+                "role_type": "AI Engineer",
+                "output_language": "English",
+                "demo_mode": "true",
+            },
+            files={"resume_pdf": ("resume.pdf", b"not a pdf", "application/pdf")},
+        )
+        job_id = create_response.json()["job_id"]
+        detail_response = client.get(f"/sessions/jobs/{job_id}")
+
+    assert create_response.status_code == 202
+    payload = detail_response.json()
+    assert payload["status"] == "failed"
+    assert payload["error"]["code"] == "pdf_parse_error"
+    assert payload["steps"][0]["name"] == "parse_resume"
+    assert payload["steps"][0]["status"] == "failed"
+
+
+def test_session_job_detail_returns_404_for_missing_job(monkeypatch):
+    import app.routes.interview as interview_routes
+
+    monkeypatch.setattr(interview_routes, "get_session_job", lambda job_id: None)
+    with _client_without_startup_db(monkeypatch) as client:
+        response = client.get("/sessions/jobs/missing")
+
+    assert response.status_code == 404
+
+
+def test_openapi_exposes_session_job_endpoints(monkeypatch):
+    with _client_without_startup_db(monkeypatch) as client:
+        paths = client.get("/openapi.json").json()["paths"]
+
+    assert "/sessions/jobs" in paths
+    assert "/sessions/jobs/{job_id}" in paths
 
 
 def test_sessions_endpoints_return_summaries_and_detail(monkeypatch):

@@ -20,6 +20,14 @@ from app.services.report_export import (
     pdf_filename,
     report_filename,
 )
+from app.frontend.api_client import (
+    api_get,
+    create_session_from_upload,
+    create_session_job,
+    friendly_api_error,
+    get_session_job,
+    should_fallback_to_sync,
+)
 
 
 DEFAULT_API_BASE_URL = "https://backend-production-b0243.up.railway.app"
@@ -200,84 +208,6 @@ st.markdown(
 )
 
 
-def api_get(path: str) -> Any:
-    response = requests.get(f"{API_BASE_URL}{path}", timeout=30)
-    response.raise_for_status()
-    return response.json()
-
-
-def create_session_job(
-    resume_file,
-    job_description: str,
-    role_type: str,
-    output_language: str,
-    demo_mode: bool,
-) -> dict[str, Any]:
-    files = {"resume_pdf": (resume_file.name, resume_file.getvalue(), "application/pdf")}
-    data = {
-        "job_description": job_description,
-        "role_type": role_type,
-        "output_language": output_language,
-        "demo_mode": demo_mode,
-    }
-    response = requests.post(
-        f"{API_BASE_URL}/sessions/jobs",
-        files=files,
-        data=data,
-        timeout=30,
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-def create_session_from_upload(
-    resume_file,
-    job_description: str,
-    role_type: str,
-    output_language: str,
-    demo_mode: bool,
-) -> dict[str, Any]:
-    files = {"resume_pdf": (resume_file.name, resume_file.getvalue(), "application/pdf")}
-    data = {
-        "job_description": job_description,
-        "role_type": role_type,
-        "output_language": output_language,
-        "demo_mode": demo_mode,
-    }
-    response = requests.post(
-        f"{API_BASE_URL}/sessions/from-upload",
-        files=files,
-        data=data,
-        timeout=240,
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-def get_session_job(status_url: str) -> dict[str, Any]:
-    return api_get(status_url)
-
-
-def should_fallback_to_sync(exc: requests.HTTPError) -> bool:
-    return exc.response is not None and exc.response.status_code in {404, 405}
-
-
-def friendly_api_error(exc: requests.HTTPError) -> tuple[str, str | None]:
-    if exc.response is None:
-        return str(exc), None
-    try:
-        payload = exc.response.json()
-    except ValueError:
-        return exc.response.text, None
-
-    detail = payload.get("detail", payload)
-    if isinstance(detail, dict):
-        return detail.get("message", "The request failed."), detail.get("action")
-    if isinstance(detail, str):
-        return detail, None
-    return str(detail), None
-
-
 def show_job_progress(job: dict[str, Any]) -> None:
     status = job.get("status", "queued")
     progress = int(job.get("progress_percent", 0))
@@ -323,13 +253,13 @@ def show_job_progress(job: dict[str, Any]) -> None:
 
 def poll_session_job(status_url: str) -> dict[str, Any]:
     placeholder = st.empty()
-    job = get_session_job(status_url)
+    job = get_session_job(API_BASE_URL, status_url)
     with placeholder.container():
         show_job_progress(job)
 
     while job.get("status") not in TERMINAL_JOB_STATUSES:
         time.sleep(1.25)
-        job = get_session_job(status_url)
+        job = get_session_job(API_BASE_URL, status_url)
         placeholder.empty()
         with placeholder.container():
             show_job_progress(job)
@@ -478,12 +408,12 @@ with st.sidebar:
     st.divider()
     st.subheader("Saved sessions")
     try:
-        summaries = api_get("/sessions")
+        summaries = api_get(API_BASE_URL, "/sessions")
         for summary in summaries:
             mode = " | demo" if summary.get("demo_mode") else ""
             label = f"#{summary['id']} | {summary['role_type']} | {summary['overall_fit_score']}{mode}"
             if st.button(label, key=f"session-{summary['id']}", use_container_width=True):
-                st.session_state["active_session"] = api_get(f"/sessions/{summary['id']}")
+                st.session_state["active_session"] = api_get(API_BASE_URL, f"/sessions/{summary['id']}")
     except requests.RequestException:
         st.caption("Start the FastAPI backend to load sessions.")
 
@@ -555,6 +485,7 @@ if run:
             try:
                 try:
                     job_create = create_session_job(
+                        API_BASE_URL,
                         resume_file,
                         job_description.strip(),
                         selected_role,
@@ -569,6 +500,7 @@ if run:
                         state="running",
                     )
                     session = create_session_from_upload(
+                        API_BASE_URL,
                         resume_file,
                         job_description.strip(),
                         selected_role,

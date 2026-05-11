@@ -108,6 +108,12 @@ Turn on `Demo mode` in the sidebar to generate sample analysis without OpenAI AP
 
 The full session workflow batches answer generation into one OpenAI call instead of calling the model once per question.
 
+## Branch Workflow
+
+- `main` is connected to the Railway production backend. Pushing to `main` can trigger a production deployment.
+- Use `dev` for feature work and test pushes before merging to `main`.
+- CI runs on pushes and pull requests for both `main` and `dev`.
+
 ## API Endpoints
 
 - `GET /health`
