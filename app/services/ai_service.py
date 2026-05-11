@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Iterator
 
 from openai import OpenAI
 
@@ -109,6 +109,43 @@ class AIInterviewService:
                 f"Resume:\n{request.resume_text}"
             ),
         )
+
+    def stream_answer(self, request: GenerateAnswerRequest) -> Iterator[str]:
+        language_instruction = self._language_instruction(
+            request.output_language,
+            fallback_language_source="question",
+            job_description=request.job_description,
+        )
+        job_description_context = (
+            f"Job description:\n{request.job_description}\n\n" if request.job_description else ""
+        )
+        with self.client.responses.stream(
+            model=self.model,
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an interview answer coach. Write a concise, natural answer. "
+                        "Output only the answer text — no labels, no JSON, no markdown headers. "
+                        "Use only the resume information supplied. "
+                        "Do not invent employers, project names, technologies, metrics, dates, or outcomes. "
+                        "If the resume lacks direct evidence, say how to honestly frame adjacent experience. "
+                        f"{language_instruction}"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Target role type: {request.role_type}\n"
+                        f"Question category: {request.category}\n"
+                        f"Question: {request.question}\n\n"
+                        f"{job_description_context}"
+                        f"Resume:\n{request.resume_text}"
+                    ),
+                },
+            ],
+        ) as stream:
+            yield from stream.text_deltas
 
     def generate_answers_for_question_set(
         self,

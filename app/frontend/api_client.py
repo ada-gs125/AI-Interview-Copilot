@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, Iterator
 
 import requests
 
@@ -113,6 +114,26 @@ def create_session_from_upload(
 
 def get_session_job(api_base_url: str, status_url: str, access_token: str | None = None) -> dict[str, Any]:
     return api_get(api_base_url, status_url, access_token)
+
+
+def stream_answer(
+    api_base_url: str,
+    payload: dict[str, Any],
+    access_token: str | None = None,
+) -> Iterator[str]:
+    with requests.post(
+        f"{api_base_url}/generate-answer/stream",
+        json=payload,
+        headers=auth_headers(access_token),
+        stream=True,
+        timeout=60,
+    ) as response:
+        response.raise_for_status()
+        for line in response.iter_lines():
+            if not line or line == b"data: [DONE]":
+                break
+            if line.startswith(b"data: "):
+                yield json.loads(line[6:])
 
 
 def should_fallback_to_sync(exc: requests.HTTPError) -> bool:

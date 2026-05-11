@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Iterator
+
 from app.schemas import (
     AnswerResult,
     AnswerSet,
@@ -162,6 +166,12 @@ class MockAIInterviewService:
             resume_evidence_used=["Demo mode sample evidence."],
             honesty_guardrail="Demo mode does not use real resume evidence; real mode grounds answers in the uploaded resume.",
         )
+
+    def stream_answer(self, request: GenerateAnswerRequest) -> Iterator[str]:
+        text = self.generate_answer(request).concise_answer
+        chunk_size = 25
+        for i in range(0, len(text), chunk_size):
+            yield text[i : i + chunk_size]
 
     def generate_answers_for_question_set(
         self,
