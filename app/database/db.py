@@ -44,95 +44,9 @@ def get_connection() -> Iterator[psycopg.Connection[DictRow]]:
 
 
 def init_db() -> None:
+    from app.database.migrations import run_migrations
     with get_connection() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id BIGSERIAL PRIMARY KEY,
-                email TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
-            ON users (lower(email))
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sessions (
-                id BIGSERIAL PRIMARY KEY,
-                user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
-                created_at TIMESTAMPTZ NOT NULL,
-                role_type TEXT NOT NULL,
-                output_language TEXT NOT NULL DEFAULT 'Match job description language',
-                demo_mode BOOLEAN NOT NULL DEFAULT FALSE,
-                job_description TEXT NOT NULL,
-                resume_text TEXT NOT NULL,
-                jd_analysis JSONB NOT NULL,
-                resume_match JSONB NOT NULL,
-                questions JSONB NOT NULL,
-                answers JSONB NOT NULL
-            )
-            """
-        )
-        conn.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE CASCADE")
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sessions_created_at
-            ON sessions (created_at DESC)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sessions_user_created_at
-            ON sessions (user_id, created_at DESC)
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS session_jobs (
-                id TEXT PRIMARY KEY,
-                user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
-                status TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL,
-                updated_at TIMESTAMPTZ NOT NULL,
-                completed_at TIMESTAMPTZ,
-                current_step TEXT,
-                progress_percent INTEGER NOT NULL DEFAULT 0,
-                role_type TEXT NOT NULL,
-                output_language TEXT NOT NULL DEFAULT 'Match job description language',
-                demo_mode BOOLEAN NOT NULL DEFAULT FALSE,
-                session_id BIGINT REFERENCES sessions(id) ON DELETE SET NULL,
-                error JSONB,
-                steps JSONB NOT NULL DEFAULT '[]'::jsonb,
-                usage JSONB NOT NULL DEFAULT '{}'::jsonb,
-                result JSONB
-            )
-            """
-        )
-        conn.execute("ALTER TABLE session_jobs ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE CASCADE")
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_session_jobs_created_at
-            ON session_jobs (created_at DESC)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_session_jobs_status
-            ON session_jobs (status)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_session_jobs_user_created_at
-            ON session_jobs (user_id, created_at DESC)
-            """
-        )
+        run_migrations(conn)
 
 
 def _row_to_user(row: DictRow) -> UserResponse:
