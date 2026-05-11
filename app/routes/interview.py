@@ -428,7 +428,7 @@ def analyze_jd(request: AnalyzeJDRequest, user: UserResponse = Depends(current_u
 
 
 @router.post("/match-resume", response_model=ResumeMatch)
-async def match_resume(
+def match_resume(
     resume_pdf: UploadFile = File(...),
     job_description: str = Form(...),
     role_type: RoleType = Form(...),
@@ -438,7 +438,7 @@ async def match_resume(
 ) -> ResumeMatch:
     try:
         effective_demo_mode = _effective_demo_mode(demo_mode)
-        resume_text = extract_resume_text(await resume_pdf.read())
+        resume_text = extract_resume_text(resume_pdf.file.read())
         return _ai_service(effective_demo_mode).match_resume(
             ResumeMatchRequest(
                 resume_text=resume_text,
@@ -475,7 +475,7 @@ def generate_answer(request: GenerateAnswerRequest, user: UserResponse = Depends
 
 
 @router.post("/sessions/from-upload", response_model=SessionResponse)
-async def create_session_from_upload(
+def create_session_from_upload(
     resume_pdf: UploadFile = File(...),
     job_description: str = Form(...),
     role_type: RoleType = Form(...),
@@ -486,7 +486,7 @@ async def create_session_from_upload(
     try:
         return _run_session_workflow(
             user_id=user.id,
-            resume_pdf_bytes=await resume_pdf.read(),
+            resume_pdf_bytes=resume_pdf.file.read(),
             job_description=job_description,
             role_type=role_type,
             output_language=output_language,
