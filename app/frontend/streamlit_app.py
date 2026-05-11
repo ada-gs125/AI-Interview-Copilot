@@ -134,6 +134,65 @@ st.markdown(
         opacity: 1;
     }
     .small-muted { color: #667085; font-size: 0.9rem; }
+
+    /* ── Auth page ── */
+    .auth-brand {
+        text-align: center;
+        padding: 1.6rem 0 1.2rem;
+    }
+    .auth-brand-title {
+        font-size: 1.45rem;
+        font-weight: 720;
+        color: #242833;
+        letter-spacing: -0.02em;
+        margin: 0 0 0.3rem;
+    }
+    .auth-brand-sub {
+        color: #8b93a4;
+        font-size: 0.84rem;
+        margin: 0;
+        letter-spacing: 0.01em;
+    }
+
+    /* ── Sidebar user badge ── */
+    .user-badge {
+        background: #eef0f5;
+        border-radius: 8px;
+        padding: 10px 13px;
+        margin: 6px 0 10px;
+    }
+    .user-badge-label {
+        font-size: 0.67rem;
+        color: #9aa1af;
+        font-weight: 680;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 3px;
+    }
+    .user-badge-email {
+        font-size: 0.83rem;
+        color: #3d4351;
+        word-break: break-all;
+    }
+
+    /* ── Session list items ── */
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button {
+        border: 1px solid #e2e5eb;
+        border-radius: 7px;
+        background: #ffffff;
+        text-align: left;
+        font-size: 0.8rem;
+        color: #3d4351;
+        padding: 7px 10px;
+        margin-bottom: 2px;
+        transition: background 0.15s, border-color 0.15s;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button:hover {
+        background: #f4f5f9;
+        border-color: #c8cdd8;
+    }
+
     .workflow-panel {
         margin-top: 2.6rem;
         max-width: 280px;
@@ -408,76 +467,66 @@ def show_session(session: dict[str, Any]) -> None:
         st.json(session)
 
 
+def _handle_auth_error(exc: Exception) -> None:
+    if isinstance(exc, requests.HTTPError):
+        message, action = friendly_api_error(exc)
+        st.error(message)
+        if action:
+            st.info(action)
+    else:
+        st.error(f"Could not reach backend: {exc}")
+
+
+# Read auth state once — used in both sidebar and main area
+access_token = st.session_state.get("access_token")
+current_user_data = st.session_state.get("current_user")
+
 with st.sidebar:
     st.title("AI Interview Copilot")
     st.caption("Resume + JD -> interview strategy, questions, and grounded answers.")
-    access_token = st.session_state.get("access_token")
-    current_user = st.session_state.get("current_user")
 
-    if access_token and current_user:
-        st.caption(f"Signed in as {current_user.get('email', '')}")
+    if access_token and current_user_data:
+        st.markdown(
+            f"""
+            <div class="user-badge">
+                <span class="user-badge-label">Signed in as</span>
+                <span class="user-badge-email">{current_user_data.get("email", "")}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         if st.button("Sign out", use_container_width=True):
-            st.session_state.pop("access_token", None)
-            st.session_state.pop("current_user", None)
-            st.session_state.pop("active_session", None)
-            st.session_state.pop("active_job", None)
+            for key in ("access_token", "current_user", "active_session", "active_job"):
+                st.session_state.pop(key, None)
             st.rerun()
-    else:
-        auth_tab, register_tab = st.tabs(["Sign in", "Create account"])
-        with auth_tab:
-            login_email = st.text_input("Email", key="login-email")
-            login_password = st.text_input("Password", type="password", key="login-password")
-            if st.button("Sign in", use_container_width=True):
-                try:
-                    auth = login_user(API_BASE_URL, login_email, login_password)
-                    st.session_state["access_token"] = auth["access_token"]
-                    st.session_state["current_user"] = auth["user"]
-                    st.rerun()
-                except requests.HTTPError as exc:
-                    message, action = friendly_api_error(exc)
-                    st.error(message)
-                    if action:
-                        st.info(action)
-                except requests.RequestException as exc:
-                    st.error(f"Could not reach backend: {exc}")
-        with register_tab:
-            register_email = st.text_input("Email", key="register-email")
-            register_password = st.text_input("Password", type="password", key="register-password")
-            if st.button("Create account", use_container_width=True):
-                try:
-                    auth = register_user(API_BASE_URL, register_email, register_password)
-                    st.session_state["access_token"] = auth["access_token"]
-                    st.session_state["current_user"] = auth["user"]
-                    st.rerun()
-                except requests.HTTPError as exc:
-                    message, action = friendly_api_error(exc)
-                    st.error(message)
-                    if action:
-                        st.info(action)
-                except requests.RequestException as exc:
-                    st.error(f"Could not reach backend: {exc}")
 
-    access_token = st.session_state.get("access_token")
-    selected_role = st.selectbox("Target role type", ROLE_TYPES)
-    selected_output_language = st.selectbox(
-        "Output language",
-        OUTPUT_LANGUAGES,
-        format_func=lambda value: OUTPUT_LANGUAGE_LABELS[value],
-    )
-    demo_mode = st.toggle(
-        "Demo mode",
-        value=False,
-        help="Use sample AI outputs without spending OpenAI API credits.",
-    )
+        selected_role = st.selectbox("Target role type", ROLE_TYPES)
+        selected_output_language = st.selectbox(
+            "Output language",
+            OUTPUT_LANGUAGES,
+            format_func=lambda value: OUTPUT_LANGUAGE_LABELS[value],
+        )
+        demo_mode = st.toggle(
+            "Demo mode",
+            value=False,
+            help="Use sample AI outputs without spending OpenAI API credits.",
+        )
 
-    st.divider()
-    st.subheader("Saved sessions")
-    if access_token:
+        st.divider()
+        st.subheader("Saved sessions")
+        ROLE_ICONS = {
+            "Backend Engineer": "⚙️",
+            "AI Engineer": "🤖",
+            "Agent Engineer": "🧠",
+            "Full-stack AI Engineer": "🔷",
+        }
         try:
             summaries = api_get(API_BASE_URL, "/sessions", access_token)
             for summary in summaries:
-                mode = " | demo" if summary.get("demo_mode") else ""
-                label = f"#{summary['id']} | {summary['role_type']} | {summary['overall_fit_score']}{mode}"
+                icon = ROLE_ICONS.get(summary["role_type"], "📄")
+                score = summary["overall_fit_score"]
+                demo_tag = " · demo" if summary.get("demo_mode") else ""
+                label = f"{icon} {summary['role_type']}  ·  {score}/100{demo_tag}"
                 if st.button(label, key=f"session-{summary['id']}", use_container_width=True):
                     st.session_state["active_session"] = api_get(
                         API_BASE_URL,
@@ -486,19 +535,71 @@ with st.sidebar:
                     )
         except requests.RequestException:
             st.caption("Start the FastAPI backend to load sessions.")
-    else:
-        st.caption("Sign in to load saved sessions.")
 
 
-st.title("Interview prep workspace")
 st.markdown(
-    '<p class="small-muted">Upload a PDF resume, paste a target JD, and generate a saved preparation session.</p>',
+    """
+    <h1 style="font-size:2rem; font-weight:760; letter-spacing:-0.02em; margin-bottom:0.15rem;">
+        Interview prep workspace
+    </h1>
+    <p class="small-muted" style="margin-top:0;">
+        Upload a PDF resume, paste a target JD, and generate a saved preparation session.
+    </p>
+    """,
     unsafe_allow_html=True,
 )
 
-access_token = st.session_state.get("access_token")
 if not access_token:
-    st.info("Sign in or create an account to generate and save interview prep sessions.")
+    _, center, _ = st.columns([0.8, 1.8, 0.8])
+    with center:
+        st.markdown(
+            """
+            <div class="auth-brand">
+                <div class="auth-brand-title">AI Interview Copilot</div>
+                <p class="auth-brand-sub">Resume &middot; Job description &middot; Personalised prep kit</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        sign_in_tab, create_tab = st.tabs(["Sign in", "Create account"])
+
+        with sign_in_tab:
+            with st.form("login_form"):
+                login_email = st.text_input("Email")
+                login_password = st.text_input("Password", type="password")
+                if st.form_submit_button("Sign in", use_container_width=True, type="primary"):
+                    if not login_email or not login_password:
+                        st.error("Email and password are required.")
+                    else:
+                        try:
+                            auth = login_user(API_BASE_URL, login_email, login_password)
+                            st.session_state["access_token"] = auth["access_token"]
+                            st.session_state["current_user"] = auth["user"]
+                            st.rerun()
+                        except Exception as exc:
+                            _handle_auth_error(exc)
+
+        with create_tab:
+            with st.form("register_form"):
+                reg_email = st.text_input("Email")
+                reg_password = st.text_input("Password", type="password", help="Minimum 8 characters")
+                reg_confirm = st.text_input("Confirm password", type="password")
+                if st.form_submit_button("Create account", use_container_width=True, type="primary"):
+                    if not reg_email or not reg_password:
+                        st.error("Email and password are required.")
+                    elif len(reg_password) < 8:
+                        st.error("Password must be at least 8 characters.")
+                    elif reg_password != reg_confirm:
+                        st.error("Passwords do not match.")
+                    else:
+                        try:
+                            auth = register_user(API_BASE_URL, reg_email, reg_password)
+                            st.session_state["access_token"] = auth["access_token"]
+                            st.session_state["current_user"] = auth["user"]
+                            st.rerun()
+                        except Exception as exc:
+                            _handle_auth_error(exc)
+
     st.stop()
 
 left, right = st.columns([1.42, 0.58], gap="large")
