@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -321,6 +324,9 @@ def _run_session_job(
         )
         return result
 
+    job_start = perf_counter()
+    logger.info("job_started", extra={"job_id": job_id, "user_id": user_id, "role_type": role_type, "demo_mode": demo_mode})
+
     try:
         effective_demo_mode = _effective_demo_mode(demo_mode)
         update_session_job(job_id, status="running", progress_percent=1)
@@ -459,6 +465,15 @@ def _run_session_job(
             result=session,
             completed=True,
         )
+        logger.info(
+            "job_succeeded",
+            extra={
+                "job_id": job_id,
+                "user_id": user_id,
+                "latency_ms": int((perf_counter() - job_start) * 1000),
+                "total_tokens": _usage_summary(all_usage_events).get("total_tokens"),
+            },
+        )
     except ValueError as exc:
         detail = _pdf_error_detail(exc)
         update_session_job(
@@ -470,6 +485,7 @@ def _run_session_job(
             usage=_usage_summary(all_usage_events),
             completed=True,
         )
+        logger.warning("job_failed", extra={"job_id": job_id, "user_id": user_id, "error_code": detail["code"]})
     except Exception as exc:
         _, detail = _ai_error_detail(exc)
         update_session_job(
@@ -481,6 +497,7 @@ def _run_session_job(
             usage=_usage_summary(all_usage_events),
             completed=True,
         )
+        logger.warning("job_failed", extra={"job_id": job_id, "user_id": user_id, "error_code": detail["code"]})
 
 
 @router.post("/analyze-jd", response_model=JDAnalysis)

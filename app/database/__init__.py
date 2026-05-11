@@ -1,5 +1,6 @@
 from app.database.db import (
     authenticate_user,
+    close_db,
     create_session,
     create_session_job,
     create_user,
@@ -15,6 +16,7 @@ from app.database.db import (
 
 __all__ = [
     "authenticate_user",
+    "close_db",
     "create_session",
     "create_session_job",
     "create_user",

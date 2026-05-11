@@ -8,6 +8,7 @@ import psycopg
 from psycopg import errors
 from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
+from psycopg_pool import ConnectionPool
 
 from app.config import get_settings
 from app.schemas import (
@@ -29,24 +30,47 @@ from app.services.auth_service import hash_password, normalize_email, verify_pas
 
 DEFAULT_OUTPUT_LANGUAGE: OutputLanguage = "Match job description language"
 
+_pool: ConnectionPool | None = None
+
 
 @contextmanager
 def get_connection() -> Iterator[psycopg.Connection[DictRow]]:
-    conn = psycopg.connect(get_settings().database_url, row_factory=dict_row)
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    if _pool is not None:
+        with _pool.connection() as conn:
+            yield conn
+    else:
+        # fallback for tests that skip init_db
+        conn = psycopg.connect(get_settings().database_url, row_factory=dict_row)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 def init_db() -> None:
+    global _pool
+    settings = get_settings()
+    _pool = ConnectionPool(
+        settings.database_url,
+        min_size=1,
+        max_size=10,
+        kwargs={"row_factory": dict_row},
+        open=True,
+    )
     from app.database.migrations import run_migrations
     with get_connection() as conn:
         run_migrations(conn)
+
+
+def close_db() -> None:
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
 
 
 def _row_to_user(row: DictRow) -> UserResponse:
