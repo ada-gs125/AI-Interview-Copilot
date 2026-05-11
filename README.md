@@ -1,8 +1,13 @@
 # AI Interview Copilot
 
+![Python](https://img.shields.io/badge/python-3.11-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-psycopg3-336791?logo=postgresql&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 Upload a PDF resume and a target job description. The app generates a full interview prep kit: JD skill analysis, resume-to-JD match scoring, tailored questions, and personalized answer scripts grounded only in the resume.
 
-**[Live API Docs](https://backend-production-b0243.up.railway.app/docs)** · Backend deployed on Railway · Frontend on Streamlit Community Cloud
+**[Live API Docs](https://backend-production-b0243.up.railway.app/docs)** · **[GitHub](https://github.com/ada-gs125/ai-interview-copilot/)** · Backend on Railway · Frontend on Streamlit Community Cloud
 
 ---
 
@@ -146,3 +151,7 @@ API_BASE_URL=http://localhost:8000 streamlit run app/frontend/streamlit_app.py
 - `main` → Railway production (push triggers deploy)
 - `dev` → feature work; merge to `main` when ready
 - CI runs `pytest -q` with a real PostgreSQL service container on both branches
+
+## License
+
+[MIT](./LICENSE) © 2026 Guosheng Su

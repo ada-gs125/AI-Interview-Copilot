@@ -77,7 +77,20 @@ STEP_LABELS = {
 }
 
 
-st.set_page_config(page_title="AI Interview Copilot", layout="wide")
+st.set_page_config(
+    page_title="AI Interview Copilot",
+    layout="wide",
+    menu_items={
+        "Get Help": "https://github.com/ada-gs125/ai-interview-copilot/",
+        "Report a bug": "https://github.com/ada-gs125/ai-interview-copilot/issues",
+        "About": (
+            "### AI Interview Copilot\n"
+            "Resume + JD → interview strategy, questions, and grounded answers.\n\n"
+            "[GitHub](https://github.com/ada-gs125/ai-interview-copilot/) · "
+            "[API Docs](https://backend-production-b0243.up.railway.app/docs)"
+        ),
+    },
+)
 
 st.markdown(
     """
