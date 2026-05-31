@@ -127,6 +127,22 @@ Content-Type: application/json
 
 Response: `text/event-stream`. Each line is `data: <json-encoded token>`. Terminated by `data: [DONE]`.
 
+## Local LLM Evals
+
+Run a deterministic local evaluation with mock AI output:
+
+```bash
+.venv/bin/python -m app.evals.run --dataset tests/evals/golden_sessions.jsonl --mock-ai --skip-llm-judge
+```
+
+Run against the configured OpenAI model and include the LLM judge:
+
+```bash
+.venv/bin/python -m app.evals.run --dataset tests/evals/golden_sessions.jsonl
+```
+
+The report includes the prompt version, weighted quality scores, rule failures, optional judge scores, and usage metadata. Add `--job-id <id>` to attach the summary to `session_jobs.usage.evaluation`.
+
 ## Deploy
 
 **Backend (Railway):** push to `main` triggers a deploy. Uses `Dockerfile` at repo root.

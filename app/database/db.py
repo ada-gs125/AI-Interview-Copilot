@@ -411,3 +411,24 @@ def get_session_job(job_id: str, *, user_id: int) -> Optional[SessionJobResponse
             (job_id, user_id),
         ).fetchone()
     return _row_to_job(row) if row else None
+
+
+def attach_session_job_evaluation(job_id: str, evaluation: dict[str, Any]) -> bool:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT usage FROM session_jobs WHERE id = %s",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        usage = dict(row["usage"] or {})
+        usage["evaluation"] = evaluation
+        conn.execute(
+            """
+            UPDATE session_jobs
+            SET usage = %s, updated_at = %s
+            WHERE id = %s
+            """,
+            (Jsonb(usage), datetime.now(timezone.utc), job_id),
+        )
+    return True

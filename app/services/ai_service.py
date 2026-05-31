@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Iterator
 
 from openai import OpenAI
@@ -20,6 +19,14 @@ from app.schemas import (
     ResumeMatchRequest,
     OutputLanguage,
     RoleType,
+)
+from app.services.prompts import (
+    generate_answer_prompt,
+    generate_answers_prompt,
+    generate_questions_prompt,
+    jd_analysis_prompt,
+    language_instruction,
+    resume_match_prompt,
 )
 
 
@@ -42,32 +49,29 @@ class AIInterviewService:
         output_language: OutputLanguage = "Match job description language",
     ) -> JDAnalysis:
         # Extract hiring signals from the job description only.
+        prompt = jd_analysis_prompt(
+            job_description=job_description,
+            role_type=role_type,
+            output_language=output_language,
+        )
         return self._parse(
             JDAnalysis,
-            system=(
-                "You are a senior technical recruiter and AI interview coach. "
-                "Extract concrete hiring signals from the job description. "
-                "Return only facts supported by the JD and keep items concise. "
-                f"{self._language_instruction(output_language)}"
-            ),
-            user=f"Target role type: {role_type}\n\nJob description:\n{job_description}",
+            system=prompt.system,
+            user=prompt.user,
         )
 
     def match_resume(self, request: ResumeMatchRequest) -> ResumeMatch:
         # Compare resume evidence against the job description without inventing facts.
+        prompt = resume_match_prompt(
+            resume_text=request.resume_text,
+            job_description=request.job_description,
+            role_type=request.role_type,
+            output_language=request.output_language,
+        )
         return self._parse(
             ResumeMatch,
-            system=(
-                "You are matching a candidate resume to a software/AI job description. "
-                "Use only evidence from the resume and JD. Penalize missing must-have skills, "
-                "but surface transferable strengths fairly. "
-                f"{self._language_instruction(request.output_language)}"
-            ),
-            user=(
-                f"Target role type: {request.role_type}\n\n"
-                f"Resume:\n{request.resume_text}\n\n"
-                f"Job description:\n{request.job_description}"
-            ),
+            system=prompt.system,
+            user=prompt.user,
         )
 
     def generate_questions(
@@ -78,101 +82,55 @@ class AIInterviewService:
     ) -> QuestionSet:
         jd_context = request.jd_analysis.model_dump_json() if request.jd_analysis else "Not provided."
         match_context = request.resume_match.model_dump_json() if request.resume_match else "Not provided."
-
-        # Optional RAG examples calibrate style and difficulty, but should not be copied.
-        few_shot_text = ""
-        if few_shot_examples:
-            lines = [
-                f"- {ex.get('question', '')}"
-                + (f" → {ex['answer'][:200]}" if ex.get("answer") else "")
-                for ex in few_shot_examples
-            ]
-            few_shot_text = (
-                "\n\nHigh-relevance questions from similar past sessions "
-                "(use as calibration reference for tone, specificity, and difficulty "
-                "— do not copy verbatim):\n" + "\n".join(lines)
-            )
+        prompt = generate_questions_prompt(
+            resume_text=request.resume_text,
+            job_description=request.job_description,
+            role_type=request.role_type,
+            output_language=request.output_language,
+            jd_context=jd_context,
+            match_context=match_context,
+            few_shot_examples=few_shot_examples,
+        )
 
         return self._parse(
             QuestionSet,
-            system=(
-                "You are designing an interview preparation question bank. "
-                "Generate practical questions a real interviewer may ask. "
-                "Use a balanced mix of fundamentals, applied project discussion, system design, and behavior. "
-                f"{self._language_instruction(request.output_language)}"
-            ),
-            user=(
-                f"Target role type: {request.role_type}\n\n"
-                f"Resume:\n{request.resume_text}\n\n"
-                f"Job description:\n{request.job_description}\n\n"
-                f"JD analysis JSON:\n{jd_context}\n\n"
-                f"Resume match JSON:\n{match_context}"
-                f"{few_shot_text}"
-            ),
+            system=prompt.system,
+            user=prompt.user,
         )
 
     def generate_answer(self, request: GenerateAnswerRequest) -> AnswerResult:
         # Generate one grounded answer for a selected interview question.
-        language_instruction = self._language_instruction(
-            request.output_language,
-            fallback_language_source="question",
+        prompt = generate_answer_prompt(
+            resume_text=request.resume_text,
             job_description=request.job_description,
-        )
-        job_description_context = (
-            f"Job description:\n{request.job_description}\n\n" if request.job_description else ""
+            role_type=request.role_type,
+            output_language=request.output_language,
+            question=request.question,
+            category=request.category,
+            structured=True,
         )
         return self._parse(
             AnswerResult,
-            system=(
-                "You are an interview answer coach. Generate a concise, natural answer. "
-                "Use only the resume information supplied by the user. "
-                "Do not invent employers, project names, technologies, metrics, dates, or outcomes. "
-                "If the resume lacks direct evidence, say how to honestly frame adjacent experience. "
-                f"{language_instruction}"
-            ),
-            user=(
-                f"Target role type: {request.role_type}\n"
-                f"Question category: {request.category}\n"
-                f"Question: {request.question}\n\n"
-                f"{job_description_context}"
-                f"Resume:\n{request.resume_text}"
-            ),
+            system=prompt.system,
+            user=prompt.user,
         )
 
     def stream_answer(self, request: GenerateAnswerRequest) -> Iterator[str]:
         # Used by the frontend regenerate button for live token streaming.
-        language_instruction = self._language_instruction(
-            request.output_language,
-            fallback_language_source="question",
+        prompt = generate_answer_prompt(
+            resume_text=request.resume_text,
             job_description=request.job_description,
-        )
-        job_description_context = (
-            f"Job description:\n{request.job_description}\n\n" if request.job_description else ""
+            role_type=request.role_type,
+            output_language=request.output_language,
+            question=request.question,
+            category=request.category,
+            structured=False,
         )
         with self.client.responses.stream(
             model=self.model,
             input=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an interview answer coach. Write a concise, natural answer. "
-                        "Output only the answer text — no labels, no JSON, no markdown headers. "
-                        "Use only the resume information supplied. "
-                        "Do not invent employers, project names, technologies, metrics, dates, or outcomes. "
-                        "If the resume lacks direct evidence, say how to honestly frame adjacent experience. "
-                        f"{language_instruction}"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Target role type: {request.role_type}\n"
-                        f"Question category: {request.category}\n"
-                        f"Question: {request.question}\n\n"
-                        f"{job_description_context}"
-                        f"Resume:\n{request.resume_text}"
-                    ),
-                },
+                {"role": "system", "content": prompt.system},
+                {"role": "user", "content": prompt.user},
             ],
         ) as stream:
             if hasattr(stream, "text_deltas"):
@@ -194,31 +152,19 @@ class AIInterviewService:
     ) -> AnswerSet:
         # Batch answers preserve each generated question and category.
         category_labels = self._answer_category_labels(output_language, job_description)
-        flattened: list[dict[str, str]] = []
-        for category, items in (
-            (category_labels["technical"], questions.technical_questions),
-            (category_labels["project"], questions.project_deep_dive_questions),
-            (category_labels["system_design"], questions.system_design_questions),
-            (category_labels["behavioral"], questions.behavioral_questions),
-        ):
-            flattened.extend({"category": category, "question": item.question} for item in items)
+        prompt = generate_answers_prompt(
+            resume_text=resume_text,
+            job_description=job_description,
+            role_type=role_type,
+            output_language=output_language,
+            questions=questions,
+            category_labels=category_labels,
+        )
 
         return self._parse(
             AnswerSet,
-            system=(
-                "You are an interview answer coach. Generate concise, natural answers for every question. "
-                "Use only the resume information supplied by the user. "
-                "Do not invent employers, project names, technologies, metrics, dates, or outcomes. "
-                "If the resume lacks direct evidence, say how to honestly frame adjacent experience. "
-                "Return one answer for each input question, preserving category and question text exactly. "
-                f"{self._language_instruction(output_language, job_description=job_description)}"
-            ),
-            user=(
-                f"Target role type: {role_type}\n\n"
-                f"Job description:\n{job_description}\n\n"
-                f"Questions JSON:\n{json.dumps(flattened, ensure_ascii=False)}\n\n"
-                f"Resume:\n{resume_text}"
-            ),
+            system=prompt.system,
+            user=prompt.user,
         )
 
     def _parse(self, schema: type, *, system: str, user: str):
@@ -289,16 +235,11 @@ class AIInterviewService:
         fallback_language_source: str = "job description",
         job_description: str | None = None,
     ) -> str:
-        if output_language == "English":
-            return "Write every user-facing field in English."
-        if output_language == "Chinese":
-            return "Write every user-facing field in Chinese."
-        if job_description:
-            return (
-                "Write every user-facing field in the same language as the job description. "
-                "If the job description is Chinese, write in Chinese and avoid English category labels unless they are proper nouns or technical terms."
-            )
-        return f"Write every user-facing field in the same language as the {fallback_language_source}."
+        return language_instruction(
+            output_language,
+            fallback_language_source=fallback_language_source,
+            job_description=job_description,
+        )
 
     def _answer_category_labels(
         self,

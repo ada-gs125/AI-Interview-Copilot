@@ -129,6 +129,27 @@ def test_create_update_and_get_session_job_round_trip(postgres_database):
     assert loaded.result.demo_mode is False
 
 
+def test_attach_session_job_evaluation_preserves_existing_usage(postgres_database):
+    user = db.create_user(email=f"user-{uuid4().hex}@example.com", password="password123")
+    job_id = f"job-{uuid4().hex}"
+    db.create_session_job(
+        job_id=job_id,
+        user_id=user.id,
+        role_type="AI Engineer",
+        output_language="English",
+        demo_mode=True,
+    )
+    db.update_session_job(job_id, usage={"call_count": 2, "total_tokens": 100})
+
+    assert db.attach_session_job_evaluation(job_id, {"average_score": 0.81}) is True
+
+    loaded = db.get_session_job(job_id, user_id=user.id)
+    assert loaded is not None
+    assert loaded.usage["call_count"] == 2
+    assert loaded.usage["total_tokens"] == 100
+    assert loaded.usage["evaluation"] == {"average_score": 0.81}
+
+
 def test_user_auth_and_session_isolation(postgres_database):
     user_a = db.create_user(email=f"user-{uuid4().hex}@example.com", password="password123")
     user_b = db.create_user(email=f"user-{uuid4().hex}@example.com", password="password123")
