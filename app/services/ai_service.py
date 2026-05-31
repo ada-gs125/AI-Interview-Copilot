@@ -64,9 +64,28 @@ class AIInterviewService:
             ),
         )
 
-    def generate_questions(self, request: GenerateQuestionsRequest) -> QuestionSet:
+    def generate_questions(
+        self,
+        request: GenerateQuestionsRequest,
+        *,
+        few_shot_examples: list[dict] | None = None,
+    ) -> QuestionSet:
         jd_context = request.jd_analysis.model_dump_json() if request.jd_analysis else "Not provided."
         match_context = request.resume_match.model_dump_json() if request.resume_match else "Not provided."
+
+        few_shot_text = ""
+        if few_shot_examples:
+            lines = [
+                f"- {ex['question']}"
+                + (f" → {ex['answer'][:200]}" if ex.get("answer") else "")
+                for ex in few_shot_examples
+            ]
+            few_shot_text = (
+                "\n\nHigh-relevance questions from similar past sessions "
+                "(use as calibration reference for tone, specificity, and difficulty "
+                "— do not copy verbatim):\n" + "\n".join(lines)
+            )
+
         return self._parse(
             QuestionSet,
             system=(
@@ -81,6 +100,7 @@ class AIInterviewService:
                 f"Job description:\n{request.job_description}\n\n"
                 f"JD analysis JSON:\n{jd_context}\n\n"
                 f"Resume match JSON:\n{match_context}"
+                f"{few_shot_text}"
             ),
         )
 

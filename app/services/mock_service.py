@@ -114,7 +114,12 @@ class MockAIInterviewService:
             resume_risks_to_prepare_for=["Be ready to explain the difference between demo mode and real OpenAI calls."],
         )
 
-    def generate_questions(self, request: GenerateQuestionsRequest) -> QuestionSet:
+    def generate_questions(
+        self,
+        request: GenerateQuestionsRequest,
+        *,
+        few_shot_examples: list[dict] | None = None,  # noqa: ARG002
+    ) -> QuestionSet:
         chinese = _use_chinese(request.output_language, request.job_description)
         if chinese:
             return QuestionSet(

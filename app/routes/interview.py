@@ -8,8 +8,6 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-logger = logging.getLogger(__name__)
-
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
@@ -44,8 +42,10 @@ from app.schemas import (
 from app.services.ai_service import AIInterviewService
 from app.services.mock_service import MockAIInterviewService
 from app.services.pdf_parser import extract_resume_text
+from app.services.rag_service import RAGQuestionBank
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["interview"])
 
 WORKFLOW_STEPS = {
@@ -369,6 +369,21 @@ def _run_session_job(
         )
 
         ai = _ai_service(effective_demo_mode)
+
+        # Retrieve few-shot examples from the semantic question bank
+        rag: RAGQuestionBank | None = None
+        few_shot_examples: list[dict] = []
+        if not effective_demo_mode and get_settings().openai_api_key:
+            from openai import OpenAI
+            rag = RAGQuestionBank(OpenAI(api_key=get_settings().openai_api_key))
+            skills = [s.name for s in jd_analysis.required_technical_skills[:10]]
+            few_shot_examples = rag.retrieve_similar(role_type, skills)
+            if few_shot_examples:
+                logger.info(
+                    "rag_retrieved",
+                    extra={"job_id": job_id, "count": len(few_shot_examples), "role_type": role_type},
+                )
+
         questions = run_step(
             "generate_questions",
             lambda: ai.generate_questions(
@@ -380,7 +395,8 @@ def _run_session_job(
                     demo_mode=effective_demo_mode,
                     jd_analysis=jd_analysis,
                     resume_match=resume_match,
-                )
+                ),
+                few_shot_examples=few_shot_examples or None,
             ),
         )
         answers = run_step(
@@ -428,6 +444,22 @@ def _run_session_job(
                 "total_tokens": _usage_summary(all_usage_events).get("total_tokens"),
             },
         )
+
+        # Store generated questions in the RAG bank for future few-shot retrieval
+        if rag is not None and session.id > 0:
+            all_questions = (
+                questions.technical_questions
+                + questions.project_deep_dive_questions
+                + questions.system_design_questions
+                + questions.behavioral_questions
+            )
+            stored = rag.store(session.id, all_questions, session.answers.answers, role_type)
+            if stored:
+                logger.info(
+                    "rag_stored",
+                    extra={"job_id": job_id, "session_id": session.id, "count": stored},
+                )
+
     except ValueError as exc:
         detail = _pdf_error_detail(exc)
         update_session_job(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -7,6 +8,8 @@ import psycopg
 
 
 _MigrationFn = Callable[[psycopg.Connection], None]
+
+logger = logging.getLogger(__name__)
 
 
 def _001_initial_schema(conn: psycopg.Connection) -> None:
@@ -87,9 +90,38 @@ def _002_add_user_auth(conn: psycopg.Connection) -> None:
     )
 
 
+def _003_add_pgvector_rag(conn: psycopg.Connection) -> None:
+    available = conn.execute(
+        "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'"
+    ).fetchone()
+    if available is None:
+        logger.warning("pgvector extension not available in this PostgreSQL instance; RAG feature disabled")
+        return
+
+    conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS question_embeddings (
+            id BIGSERIAL PRIMARY KEY,
+            session_id BIGINT REFERENCES sessions(id) ON DELETE CASCADE,
+            question_text TEXT NOT NULL,
+            answer_text TEXT,
+            embedding vector(1536),
+            role_type TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_question_embeddings_role_type "
+        "ON question_embeddings (role_type)"
+    )
+
+
 _MIGRATIONS: list[tuple[str, _MigrationFn]] = [
     ("001_initial_schema", _001_initial_schema),
     ("002_add_user_auth", _002_add_user_auth),
+    ("003_add_pgvector_rag", _003_add_pgvector_rag),
 ]
 
 

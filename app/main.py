@@ -19,15 +19,18 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Open the PostgreSQL pool and run migrations before serving requests.
     init_db()
     logger.info("startup", extra={"event": "startup"})
     yield
+    # Close database connections when the ASGI server shuts down.
     close_db()
     logger.info("shutdown", extra={"event": "shutdown"})
 
 
 settings = get_settings()
 
+# This module-level `app` object is what Uvicorn imports from `app.main:app`.
 app = FastAPI(
     title=settings.app_name,
     description="AI-powered interview preparation from a resume PDF and target job description.",
@@ -35,6 +38,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Allow the Streamlit frontend to call this API from the browser.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -43,12 +47,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Register endpoint groups from the feature modules.
 app.include_router(auth_router)
 app.include_router(interview_router)
 
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    # Let the request continue, then log status, latency, and user id if present.
     start = time.perf_counter()
     response = await call_next(request)
     latency_ms = int((time.perf_counter() - start) * 1000)
@@ -78,4 +84,5 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    # Lightweight endpoint for uptime checks and deployment health probes.
     return {"status": "ok"}
