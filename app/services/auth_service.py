@@ -60,12 +60,13 @@ def create_access_token(
 
 
 def decode_access_token(token: str, secret_key: str) -> dict[str, Any]:
-    # Validate token structure, signature, algorithm, and expiry.
+    # Validate token structure, signature, algorithm, type, expiry, and subject.
     try:
         header_b64, payload_b64, signature = token.split(".", 2)
     except ValueError as exc:
         raise ValueError("Malformed access token.") from exc
 
+    # Verify signature first — reject any tampered token before parsing its content.
     signing_input = f"{header_b64}.{payload_b64}"
     expected_signature = _sign(signing_input, secret_key)
     if not hmac.compare_digest(signature, expected_signature):
@@ -74,11 +75,18 @@ def decode_access_token(token: str, secret_key: str) -> dict[str, Any]:
     header = json.loads(_b64decode(header_b64))
     if header.get("alg") != "HS256":
         raise ValueError("Unsupported access token algorithm.")
+    if header.get("typ") != "JWT":
+        raise ValueError("Unsupported access token type.")
 
     payload = json.loads(_b64decode(payload_b64))
     exp = payload.get("exp")
     if not isinstance(exp, int) or exp < int(datetime.now(timezone.utc).timestamp()):
         raise ValueError("Access token has expired.")
+
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or not sub.isdigit():
+        raise ValueError("Access token has invalid subject claim.")
+
     return payload
 
 
@@ -96,5 +104,8 @@ def _b64encode(value: bytes) -> str:
 
 
 def _b64decode(value: str) -> bytes:
-    padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(value + padding)
+    try:
+        padding = "=" * (-len(value) % 4)
+        return base64.urlsafe_b64decode(value + padding)
+    except Exception as exc:
+        raise ValueError("Malformed base64 encoding in access token.") from exc

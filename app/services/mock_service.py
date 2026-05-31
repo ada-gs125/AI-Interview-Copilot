@@ -123,7 +123,7 @@ class MockAIInterviewService:
         self,
         request: GenerateQuestionsRequest,
         *,
-        few_shot_examples: list[dict] | None = None,  # noqa: ARG002
+        few_shot_examples: list[dict] | None = None,
     ) -> QuestionSet:
         chinese = _use_chinese(request.output_language, request.job_description)
         if chinese:

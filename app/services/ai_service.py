@@ -83,7 +83,7 @@ class AIInterviewService:
         few_shot_text = ""
         if few_shot_examples:
             lines = [
-                f"- {ex['question']}"
+                f"- {ex.get('question', '')}"
                 + (f" → {ex['answer'][:200]}" if ex.get("answer") else "")
                 for ex in few_shot_examples
             ]

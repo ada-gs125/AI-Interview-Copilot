@@ -108,14 +108,29 @@ def _003_add_pgvector_rag(conn: psycopg.Connection) -> None:
             answer_text TEXT,
             embedding vector(1536),
             role_type TEXT NOT NULL,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
         """
     )
+    # B-tree index for fast per-user role-type filtering before the vector scan.
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_question_embeddings_role_type "
-        "ON question_embeddings (role_type)"
+        "CREATE INDEX IF NOT EXISTS idx_question_embeddings_user_role "
+        "ON question_embeddings (user_id, role_type)"
     )
+    # HNSW index for sub-linear approximate nearest-neighbour search (pgvector >= 0.5.0).
+    # Falls back gracefully on older installations via savepoint.
+    conn.execute("SAVEPOINT hnsw_index")
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_question_embeddings_hnsw "
+            "ON question_embeddings USING hnsw (embedding vector_cosine_ops)"
+        )
+        conn.execute("RELEASE SAVEPOINT hnsw_index")
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT hnsw_index")
+        conn.execute("RELEASE SAVEPOINT hnsw_index")
+        logger.warning("HNSW index not available (requires pgvector >= 0.5.0); vector queries will use sequential scan")
 
 
 _MIGRATIONS: list[tuple[str, _MigrationFn]] = [

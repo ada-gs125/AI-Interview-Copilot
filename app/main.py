@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.database import close_db, init_db
+from app.database import cleanup_orphan_jobs, close_db, init_db
 from app.logging_config import configure_logging
 from app.routes.auth import router as auth_router
 from app.routes.interview import router as interview_router
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(_: FastAPI):
     # Open the PostgreSQL pool and run migrations before serving requests.
     init_db()
+    cleanup_orphan_jobs()
     logger.info("startup", extra={"event": "startup"})
     yield
     # Close database connections when the ASGI server shuts down.
