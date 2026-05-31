@@ -1,3 +1,5 @@
+"""Background workflow orchestration for generating interview prep sessions."""
+
 from __future__ import annotations
 
 import logging
@@ -47,6 +49,7 @@ def get_ai_service(demo_mode: bool = False) -> AIInterviewService | MockAIInterv
 
 
 def effective_demo_mode(demo_mode: bool = False) -> bool:
+    # Force demo mode when the deployment has no OpenAI credentials.
     return demo_mode or not bool(get_settings().openai_api_key)
 
 
@@ -55,6 +58,7 @@ def error_detail(message: str, action: str, code: str) -> dict[str, str]:
 
 
 def pdf_error_detail(exc: ValueError) -> dict[str, str]:
+    # PDF parsing failures are user-fixable, so return a specific action.
     return error_detail(
         message=str(exc),
         action="Upload a text-based PDF resume. Scanned image PDFs may need OCR first.",

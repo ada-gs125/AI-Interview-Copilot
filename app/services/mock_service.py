@@ -1,3 +1,5 @@
+"""Deterministic AI service used for demo mode and local runs without OpenAI."""
+
 from __future__ import annotations
 
 from typing import Iterator
@@ -19,6 +21,7 @@ from app.schemas import (
 
 
 def _use_chinese(output_language: OutputLanguage, job_description: str = "") -> bool:
+    # Match-JD mode switches to Chinese when the JD contains Chinese characters.
     if output_language == "Chinese":
         return True
     if output_language == "English":
@@ -27,6 +30,8 @@ def _use_chinese(output_language: OutputLanguage, job_description: str = "") -> 
 
 
 class MockAIInterviewService:
+    """Returns stable sample data with the same interface as AIInterviewService."""
+
     def analyze_jd(
         self,
         job_description: str,
@@ -173,6 +178,7 @@ class MockAIInterviewService:
         )
 
     def stream_answer(self, request: GenerateAnswerRequest) -> Iterator[str]:
+        # Simulate streaming by splitting the deterministic answer into chunks.
         text = self.generate_answer(request).concise_answer
         chunk_size = 25
         for i in range(0, len(text), chunk_size):
@@ -187,6 +193,7 @@ class MockAIInterviewService:
         output_language: OutputLanguage,
         questions: QuestionSet,
     ) -> AnswerSet:
+        # Reuse single-answer generation so demo output stays internally consistent.
         if _use_chinese(output_language, job_description):
             categories = (
                 ("技术问题", questions.technical_questions),

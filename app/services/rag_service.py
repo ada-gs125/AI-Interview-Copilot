@@ -1,3 +1,5 @@
+"""pgvector-backed semantic question bank for few-shot question generation."""
+
 from __future__ import annotations
 
 import json
@@ -31,6 +33,7 @@ class RAGQuestionBank:
     # ------------------------------------------------------------------
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+        # Limit input length defensively before calling the embeddings API.
         resp = self.client.embeddings.create(
             model=_EMBEDDING_MODEL,
             input=[t[:8000] for t in texts],
@@ -49,6 +52,7 @@ class RAGQuestionBank:
         k: int = 5,
     ) -> list[dict[str, Any]]:
         """Return up to k past questions most similar to the given role+skills."""
+        # Search within the same role type to avoid irrelevant cross-role examples.
         query = f"{role_type}: {', '.join(skills[:10])}"
         try:
             [embedding] = self._embed_batch([query])
@@ -91,6 +95,7 @@ class RAGQuestionBank:
         role_type: str,
     ) -> int:
         """Batch-embed and store all questions. Returns count stored, 0 on failure."""
+        # Store question meaning plus the generated answer for later prompt examples.
         if not questions:
             return 0
 

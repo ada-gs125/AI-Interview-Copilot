@@ -1,3 +1,5 @@
+"""Password hashing and minimal HS256 JWT helpers for auth routes."""
+
 from __future__ import annotations
 
 import base64
@@ -10,16 +12,19 @@ from typing import Any
 
 
 def normalize_email(email: str) -> str:
+    # Store and compare email addresses in one canonical form.
     return email.strip().lower()
 
 
 def hash_password(password: str) -> str:
+    # PBKDF2 with a per-password random salt; no external auth dependency needed.
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 260_000)
     return f"pbkdf2_sha256${_b64encode(salt)}${_b64encode(digest)}"
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    # Recompute the PBKDF2 digest and compare in constant time.
     try:
         algorithm, salt_b64, digest_b64 = password_hash.split("$", 2)
     except ValueError:
@@ -40,6 +45,7 @@ def create_access_token(
     secret_key: str,
     expires_minutes: int,
 ) -> str:
+    # Build a compact JWT-like token signed with HMAC-SHA256.
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -54,6 +60,7 @@ def create_access_token(
 
 
 def decode_access_token(token: str, secret_key: str) -> dict[str, Any]:
+    # Validate token structure, signature, algorithm, and expiry.
     try:
         header_b64, payload_b64, signature = token.split(".", 2)
     except ValueError as exc:
