@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any, Callable, Union
+from typing import Any, Callable, Literal, Union
 
 from openai import OpenAI
 
@@ -42,6 +43,36 @@ WORKFLOW_STEPS = {
     "generate_answers": 84,
     "save_session": 96,
 }
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class WorkflowStep:
+    name: str
+    status: Literal["running", "succeeded", "failed"] = "running"
+    started_at: str = field(default_factory=_now_iso)
+    completed_at: str | None = None
+    latency_ms: int | None = None
+    usage: dict = field(default_factory=dict)
+    error_message: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "name": self.name,
+            "status": self.status,
+            "started_at": self.started_at,
+            "usage": self.usage,
+        }
+        if self.completed_at is not None:
+            d["completed_at"] = self.completed_at
+        if self.latency_ms is not None:
+            d["latency_ms"] = self.latency_ms
+        if self.error_message is not None:
+            d["error_message"] = self.error_message
+        return d
 
 
 def get_ai_service(demo_mode: bool = False) -> AIService:
@@ -115,10 +146,6 @@ def ai_error_detail(exc: Exception) -> tuple[int, dict[str, str]]:
     )
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _usage_events(ai: Any) -> list[dict[str, Any]]:
     if hasattr(ai, "usage_snapshot"):
         return ai.usage_snapshot()
@@ -132,7 +159,7 @@ def _usage_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         values = [
             event.get(key)
             for event in events
-            if isinstance(event.get(key), int) or isinstance(event.get(key), float)
+            if isinstance(event.get(key), (int, float))
         ]
         if values:
             summary[key] = round(sum(values), 6) if key == "estimated_cost_usd" else sum(values)
@@ -162,7 +189,7 @@ class InterviewWorkflowRunner:
         self.demo_mode = demo_mode
 
         self.effective_demo_mode = effective_demo_mode(demo_mode)
-        self.steps: list[dict[str, Any]] = []
+        self.steps: list[WorkflowStep] = []
         self.all_usage_events: list[dict[str, Any]] = []
         self.ai: AIService | None = None
         self.rag: RAGQuestionBank | None = None
@@ -190,12 +217,16 @@ class InterviewWorkflowRunner:
             _, detail = ai_error_detail(exc)
             self._fail_job(detail, detail["message"])
 
+    # ------------------------------------------------------------------
+    # Workflow orchestration
+    # ------------------------------------------------------------------
+
     def _run_workflow(self) -> SessionResponse:
         resume_text = self._run_step("parse_resume", lambda: extract_resume_text(self.resume_pdf_bytes))
         jd_analysis, resume_match = self._analyze_job_and_resume(resume_text)
 
         self.ai = get_ai_service(self.effective_demo_mode)
-        few_shot_examples = self._retrieve_few_shot_examples(jd_analysis)
+        self.rag, few_shot_examples = self._init_rag(jd_analysis)
 
         questions = self._run_step(
             "generate_questions",
@@ -233,16 +264,27 @@ class InterviewWorkflowRunner:
             ),
         )
 
-    def _run_step(self, name: str, operation: Callable[[], Any]):
-        # Run one workflow step, record latency/usage, and persist progress.
-        step = {"name": name, "status": "running", "started_at": _now_iso(), "usage": {}}
+    def _analyze_job_and_resume(self, resume_text: str) -> tuple[JDAnalysis, ResumeMatch]:
+        jd_analysis, resume_match = self._run_parallel_steps([
+            ("analyze_jd", self._do_analyze_jd),
+            ("match_resume", lambda: self._do_match_resume(resume_text)),
+        ])
+        return jd_analysis, resume_match
+
+    # ------------------------------------------------------------------
+    # Step execution primitives
+    # ------------------------------------------------------------------
+
+    def _run_step(self, name: str, operation: Callable[[], Any]) -> Any:
+        """Run a sequential step: track progress, latency, and usage."""
+        step = WorkflowStep(name=name)
         self.steps.append(step)
         update_session_job(
             self.job_id,
             status="running",
             current_step=name,
             progress_percent=max(1, WORKFLOW_STEPS[name] - 10),
-            steps=self.steps,
+            steps=self._steps_as_dicts(),
             usage=_usage_summary(self.all_usage_events),
         )
 
@@ -250,79 +292,89 @@ class InterviewWorkflowRunner:
         start = perf_counter()
         result = operation()
         latency_ms = int((perf_counter() - start) * 1000)
-        usage_after = _usage_events(self.ai)
-        step_usage_events = usage_after[usage_before:]
+        step_usage_events = _usage_events(self.ai)[usage_before:]
         self.all_usage_events.extend(step_usage_events)
 
-        step.update(
-            {
-                "status": "succeeded",
-                "completed_at": _now_iso(),
-                "latency_ms": latency_ms,
-                "usage": _usage_summary(step_usage_events),
-            }
-        )
+        step.status = "succeeded"
+        step.completed_at = _now_iso()
+        step.latency_ms = latency_ms
+        step.usage = _usage_summary(step_usage_events)
+
         update_session_job(
             self.job_id,
             current_step=name,
             progress_percent=WORKFLOW_STEPS[name],
-            steps=self.steps,
+            steps=self._steps_as_dicts(),
             usage=_usage_summary(self.all_usage_events),
         )
         return result
 
-    def _analyze_job_and_resume(self, resume_text: str) -> tuple[JDAnalysis, ResumeMatch]:
-        ai_jd = get_ai_service(self.effective_demo_mode)
-        ai_match = get_ai_service(self.effective_demo_mode)
-        analyze_step = {"name": "analyze_jd", "status": "running", "started_at": _now_iso(), "usage": {}}
-        match_step = {"name": "match_resume", "status": "running", "started_at": _now_iso(), "usage": {}}
-        self.steps.extend([analyze_step, match_step])
+    def _run_parallel_steps(
+        self,
+        tasks: list[tuple[str, Callable[[], tuple[Any, int, list[dict[str, Any]]]]]],
+    ) -> list[Any]:
+        """Run steps concurrently; each callable returns (result, latency_ms, usage_events)."""
+        steps = [WorkflowStep(name=name) for name, _ in tasks]
+        for step in steps:
+            self.steps.append(step)
+
         update_session_job(
             self.job_id,
             status="running",
-            current_step="analyze_jd",
-            progress_percent=max(1, WORKFLOW_STEPS["analyze_jd"] - 10),
-            steps=self.steps,
+            current_step=tasks[0][0],
+            progress_percent=max(1, WORKFLOW_STEPS[tasks[0][0]] - 10),
+            steps=self._steps_as_dicts(),
             usage=_usage_summary(self.all_usage_events),
         )
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            jd_future = executor.submit(self._do_analyze_jd, ai_jd)
-            match_future = executor.submit(self._do_match_resume, ai_match, resume_text)
+        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+            futures = [executor.submit(fn) for _, fn in tasks]
 
-        jd_analysis, jd_latency, jd_exc = self._resolve_future(jd_future)
-        resume_match, match_latency, match_exc = self._resolve_future(match_future)
+        results: list[Any] = []
+        first_exc: Exception | None = None
+        for step, future in zip(steps, futures):
+            try:
+                result, latency_ms, usage_events = future.result(timeout=120)
+                step.status = "succeeded"
+                step.completed_at = _now_iso()
+                step.latency_ms = latency_ms
+                step.usage = _usage_summary(usage_events)
+                self.all_usage_events.extend(usage_events)
+                results.append(result)
+            except Exception as exc:
+                step.status = "failed"
+                step.completed_at = _now_iso()
+                step.error_message = str(exc)
+                results.append(None)
+                if first_exc is None:
+                    first_exc = exc
 
-        if jd_exc or match_exc:
-            self._finish_parallel_step(analyze_step, jd_latency, _usage_events(ai_jd), jd_exc)
-            self._finish_parallel_step(match_step, match_latency, _usage_events(ai_match), match_exc)
-            exc = jd_exc or match_exc
-            raise exc
-
-        jd_usage = _usage_events(ai_jd)
-        match_usage = _usage_events(ai_match)
-        self.all_usage_events.extend(jd_usage)
-        self.all_usage_events.extend(match_usage)
-
-        self._finish_parallel_step(analyze_step, jd_latency, jd_usage, None)
-        self._finish_parallel_step(match_step, match_latency, match_usage, None)
         update_session_job(
             self.job_id,
-            current_step="match_resume",
-            progress_percent=WORKFLOW_STEPS["match_resume"],
-            steps=self.steps,
+            current_step=tasks[-1][0],
+            progress_percent=WORKFLOW_STEPS[tasks[-1][0]],
+            steps=self._steps_as_dicts(),
             usage=_usage_summary(self.all_usage_events),
         )
-        return jd_analysis, resume_match
 
-    def _do_analyze_jd(self, ai_jd: AIService) -> tuple[JDAnalysis, int]:
-        start = perf_counter()
-        result = ai_jd.analyze_jd(self.job_description, self.role_type, self.output_language)
-        return result, int((perf_counter() - start) * 1000)
+        if first_exc is not None:
+            raise first_exc
+        return results
 
-    def _do_match_resume(self, ai_match: AIService, resume_text: str) -> tuple[ResumeMatch, int]:
+    # ------------------------------------------------------------------
+    # Per-step workers
+    # ------------------------------------------------------------------
+
+    def _do_analyze_jd(self) -> tuple[JDAnalysis, int, list[dict[str, Any]]]:
+        ai = get_ai_service(self.effective_demo_mode)
         start = perf_counter()
-        result = ai_match.match_resume(
+        result = ai.analyze_jd(self.job_description, self.role_type, self.output_language)
+        return result, int((perf_counter() - start) * 1000), _usage_events(ai)
+
+    def _do_match_resume(self, resume_text: str) -> tuple[ResumeMatch, int, list[dict[str, Any]]]:
+        ai = get_ai_service(self.effective_demo_mode)
+        start = perf_counter()
+        result = ai.match_resume(
             ResumeMatchRequest(
                 resume_text=resume_text,
                 job_description=self.job_description,
@@ -331,49 +383,26 @@ class InterviewWorkflowRunner:
                 demo_mode=self.effective_demo_mode,
             )
         )
-        return result, int((perf_counter() - start) * 1000)
+        return result, int((perf_counter() - start) * 1000), _usage_events(ai)
 
-    def _resolve_future(self, future) -> tuple[Any, int, Exception | None]:
-        try:
-            result, latency_ms = future.result(timeout=120)
-            return result, latency_ms, None
-        except Exception as exc:
-            return None, 0, exc
-
-    def _finish_parallel_step(
-        self,
-        step: dict[str, Any],
-        latency_ms: int,
-        usage_events: list[dict[str, Any]],
-        error: Exception | None,
-    ) -> None:
-        step.update(
-            {
-                "status": "failed" if error else "succeeded",
-                "completed_at": _now_iso(),
-                "latency_ms": latency_ms,
-                "usage": _usage_summary(usage_events),
-            }
-        )
-        if error is not None:
-            step["error_message"] = str(error)
-
-    def _retrieve_few_shot_examples(self, jd_analysis: JDAnalysis) -> list[dict[str, Any]]:
-        # Retrieve few-shot examples from the semantic question bank.
+    def _init_rag(
+        self, jd_analysis: JDAnalysis
+    ) -> tuple[RAGQuestionBank | None, list[dict[str, Any]]]:
+        """Initialize the RAG question bank and retrieve few-shot examples."""
         if self.effective_demo_mode or not get_settings().openai_api_key:
-            return []
+            return None, []
 
         # Reuse the existing OpenAI client rather than creating a second HTTP connection pool.
         client = self.ai.client if isinstance(self.ai, AIInterviewService) else OpenAI(api_key=get_settings().openai_api_key)
-        self.rag = RAGQuestionBank(client)
+        rag = RAGQuestionBank(client)
         skills = [s.name for s in jd_analysis.required_technical_skills[:10]]
-        few_shot_examples = self.rag.retrieve_similar(self.role_type, skills, user_id=self.user_id)
-        if few_shot_examples:
+        examples = rag.retrieve_similar(self.role_type, skills, user_id=self.user_id)
+        if examples:
             logger.info(
                 "rag_retrieved",
-                extra={"job_id": self.job_id, "count": len(few_shot_examples), "role_type": self.role_type},
+                extra={"job_id": self.job_id, "count": len(examples), "role_type": self.role_type},
             )
-        return few_shot_examples
+        return rag, examples
 
     def _persist_or_preview_session(
         self,
@@ -388,7 +417,7 @@ class InterviewWorkflowRunner:
         if self.effective_demo_mode:
             return SessionResponse(
                 id=0,
-                created_at=datetime.now(timezone.utc).isoformat(),
+                created_at=_now_iso(),
                 user_id=self.user_id,
                 role_type=self.role_type,
                 output_language=self.output_language,
@@ -418,6 +447,10 @@ class InterviewWorkflowRunner:
             raise RuntimeError("Session was saved but could not be loaded.")
         return session
 
+    # ------------------------------------------------------------------
+    # Job lifecycle helpers
+    # ------------------------------------------------------------------
+
     def _complete_job(self, session: SessionResponse) -> None:
         update_session_job(
             self.job_id,
@@ -425,7 +458,7 @@ class InterviewWorkflowRunner:
             current_step="completed",
             progress_percent=100,
             session_id=session.id if session.id else None,
-            steps=self.steps,
+            steps=self._steps_as_dicts(),
             usage=_usage_summary(self.all_usage_events),
             result=session,
             completed=True,
@@ -466,7 +499,7 @@ class InterviewWorkflowRunner:
             status="failed",
             progress_percent=self._current_progress(),
             error=detail,
-            steps=self.steps,
+            steps=self._steps_as_dicts(),
             usage=_usage_summary(self.all_usage_events),
             completed=True,
         )
@@ -476,19 +509,18 @@ class InterviewWorkflowRunner:
         )
 
     def _mark_failed_step(self, message: str) -> None:
-        if self.steps and self.steps[-1]["status"] == "running":
-            self.steps[-1].update(
-                {
-                    "status": "failed",
-                    "completed_at": _now_iso(),
-                    "error_message": message,
-                }
-            )
+        if self.steps and self.steps[-1].status == "running":
+            self.steps[-1].status = "failed"
+            self.steps[-1].completed_at = _now_iso()
+            self.steps[-1].error_message = message
 
     def _current_progress(self) -> int:
         if not self.steps:
             return 0
-        return WORKFLOW_STEPS.get(self.steps[-1]["name"], 0)
+        return WORKFLOW_STEPS.get(self.steps[-1].name, 0)
+
+    def _steps_as_dicts(self) -> list[dict[str, Any]]:
+        return [s.to_dict() for s in self.steps]
 
 
 def run_session_job(
