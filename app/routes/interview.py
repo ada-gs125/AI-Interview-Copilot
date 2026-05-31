@@ -370,8 +370,20 @@ def _run_session_job(
         with ThreadPoolExecutor(max_workers=2) as executor:
             jd_future = executor.submit(_do_analyze_jd)
             match_future = executor.submit(_do_match_resume)
-            jd_exc = jd_future.exception()
-            match_exc = match_future.exception()
+
+        try:
+            jd_analysis, jd_latency = jd_future.result(timeout=120)
+            jd_exc = None
+        except Exception as e:
+            jd_exc = e
+            jd_analysis, jd_latency = None, 0
+
+        try:
+            resume_match, match_latency = match_future.result(timeout=120)
+            match_exc = None
+        except Exception as e:
+            match_exc = e
+            resume_match, match_latency = None, 0
 
         if jd_exc or match_exc:
             analyze_step.update({
@@ -385,9 +397,6 @@ def _run_session_job(
                 **({} if not match_exc else {"error_message": str(match_exc)}),
             })
             raise (jd_exc or match_exc)
-
-        jd_analysis, jd_latency = jd_future.result()
-        resume_match, match_latency = match_future.result()
 
         jd_usage = _usage_events(ai_jd)
         match_usage = _usage_events(ai_match)

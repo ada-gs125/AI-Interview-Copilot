@@ -4,6 +4,7 @@ import json
 from typing import Any, Iterator
 
 from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 
 from app.config import Settings
 from app.schemas import (
@@ -185,7 +186,20 @@ class AIInterviewService:
         )
 
     def _parse(self, schema: type, *, system: str, user: str):
-        response = self.client.responses.parse(
+        response = self._call_api(schema, system=system, user=user)
+        parsed = response.output_parsed
+        if parsed is None:
+            raise RuntimeError("The model did not return a parseable structured response.")
+        self._record_usage(response, schema)
+        return parsed
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=2, max=30),
+        reraise=True,
+    )
+    def _call_api(self, schema: type, *, system: str, user: str):
+        return self.client.responses.parse(
             model=self.model,
             input=[
                 {"role": "system", "content": system},
@@ -193,11 +207,6 @@ class AIInterviewService:
             ],
             text_format=schema,
         )
-        parsed = response.output_parsed
-        if parsed is None:
-            raise RuntimeError("The model did not return a parseable structured response.")
-        self._record_usage(response, schema)
-        return parsed
 
     def usage_snapshot(self) -> list[dict[str, Any]]:
         return list(getattr(self, "usage_events", []))

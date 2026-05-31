@@ -12,3 +12,4 @@ python-multipart>=0.0.9
 requests>=2.32.0
 pytest>=8.2.0
 reportlab>=4.2.0
+tenacity>=8.2.0

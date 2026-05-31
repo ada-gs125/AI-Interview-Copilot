@@ -38,7 +38,7 @@ class AuthTokenResponse(BaseModel):
 
 
 class AnalyzeJDRequest(BaseModel):
-    job_description: str = Field(min_length=50)
+    job_description: str = Field(min_length=50, max_length=30_000)
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
     demo_mode: bool = False
@@ -62,8 +62,8 @@ class JDAnalysis(BaseModel):
 
 
 class ResumeMatchRequest(BaseModel):
-    resume_text: str = Field(min_length=50)
-    job_description: str = Field(min_length=50)
+    resume_text: str = Field(min_length=50, max_length=50_000)
+    job_description: str = Field(min_length=50, max_length=30_000)
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
     demo_mode: bool = False
@@ -86,8 +86,8 @@ class ResumeMatch(BaseModel):
 
 
 class GenerateQuestionsRequest(BaseModel):
-    resume_text: str = Field(min_length=50)
-    job_description: str = Field(min_length=50)
+    resume_text: str = Field(min_length=50, max_length=50_000)
+    job_description: str = Field(min_length=50, max_length=30_000)
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
     demo_mode: bool = False
@@ -109,11 +109,11 @@ class QuestionSet(BaseModel):
 
 
 class GenerateAnswerRequest(BaseModel):
-    resume_text: str = Field(min_length=50)
+    resume_text: str = Field(min_length=50, max_length=50_000)
     role_type: RoleType
     output_language: OutputLanguage = "Match job description language"
     demo_mode: bool = False
-    job_description: Optional[str] = Field(default=None, min_length=50)
+    job_description: Optional[str] = Field(default=None, min_length=50, max_length=30_000)
     question: str = Field(min_length=10)
     category: str = Field(min_length=3)
 

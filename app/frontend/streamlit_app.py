@@ -34,7 +34,7 @@ from app.frontend.api_client import (
 )
 
 
-DEFAULT_API_BASE_URL = "https://backend-production-b0243.up.railway.app"
+DEFAULT_API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 
 def get_api_base_url() -> str:
