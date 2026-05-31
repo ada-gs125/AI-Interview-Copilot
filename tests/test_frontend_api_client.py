@@ -59,31 +59,6 @@ def test_create_session_job_posts_to_job_endpoint(monkeypatch):
     assert timeout == 30
 
 
-def test_create_session_from_upload_posts_to_sync_endpoint(monkeypatch):
-    calls = []
-
-    def fake_post(url, *, files, data, headers, timeout):
-        calls.append((url, files, data, headers, timeout))
-        return DummyResponse({"id": 0, "demo_mode": True})
-
-    monkeypatch.setattr(api_client.requests, "post", fake_post)
-
-    payload = api_client.create_session_from_upload(
-        "https://api.example.test",
-        DummyResumeFile(),
-        "We need an AI backend engineer with Python, APIs, persistence, and LLM workflow experience.",
-        "AI Engineer",
-        "English",
-        True,
-        "token-123",
-    )
-
-    assert payload["demo_mode"] is True
-    assert calls[0][0] == "https://api.example.test/sessions/from-upload"
-    assert calls[0][3] == {"Authorization": "Bearer token-123"}
-    assert calls[0][4] == 240
-
-
 def test_get_session_job_uses_status_url(monkeypatch):
     def fake_get(url, *, headers, timeout):
         assert url == "https://api.example.test/sessions/jobs/job-123"
@@ -144,19 +119,6 @@ def test_api_get_sends_auth_header(monkeypatch):
 
     assert payload == {"id": 42, "role_type": "AI Engineer"}
     assert calls == [("https://api.example.test/sessions/42", {"Authorization": "Bearer token-123"}, 30)]
-
-
-def test_fallback_to_sync_only_for_missing_job_api():
-    missing = requests.HTTPError("missing")
-    missing.response = DummyResponse(status_code=404)
-    method_missing = requests.HTTPError("method missing")
-    method_missing.response = DummyResponse(status_code=405)
-    server_error = requests.HTTPError("server")
-    server_error.response = DummyResponse(status_code=500)
-
-    assert api_client.should_fallback_to_sync(missing) is True
-    assert api_client.should_fallback_to_sync(method_missing) is True
-    assert api_client.should_fallback_to_sync(server_error) is False
 
 
 def test_friendly_api_error_extracts_structured_detail():

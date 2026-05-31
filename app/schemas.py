@@ -37,12 +37,6 @@ class AuthTokenResponse(BaseModel):
     user: UserResponse
 
 
-class AnalyzeJDRequest(BaseModel):
-    job_description: str = Field(min_length=50, max_length=30_000)
-    role_type: RoleType
-    output_language: OutputLanguage = "Match job description language"
-    demo_mode: bool = False
-
 
 class SkillItem(BaseModel):
     name: str
