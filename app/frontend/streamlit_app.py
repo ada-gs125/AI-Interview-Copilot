@@ -216,6 +216,21 @@ st.markdown(
         background: #f4f5f9;
         border-color: #c8cdd8;
     }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"] {
+        background: #eef4ff;
+        border-color: #7aa2ff;
+        border-left: 4px solid #2f63ff;
+        box-shadow: inset 0 0 0 1px rgba(47, 99, 255, 0.12);
+        font-weight: 700;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"]:hover {
+        background: #e5efff;
+        border-color: #5f8fff;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"] p {
+        color: #173f9f;
+        -webkit-text-fill-color: #173f9f;
+    }
 
     .workflow-panel {
         margin-top: 2.6rem;
@@ -576,17 +591,26 @@ with st.sidebar:
         }
         try:
             summaries = api_get(API_BASE_URL, "/sessions", access_token)
+            active_session_id = (st.session_state.get("active_session") or {}).get("id")
             for summary in summaries:
                 icon = ROLE_ICONS.get(summary["role_type"], "📄")
                 score = summary["overall_fit_score"]
                 demo_tag = " · demo" if summary.get("demo_mode") else ""
-                label = f"{icon} {summary['role_type']}  ·  {score}/100{demo_tag}"
-                if st.button(label, key=f"session-{summary['id']}", width="stretch"):
+                is_active = summary["id"] == active_session_id
+                selected_prefix = "● " if is_active else ""
+                label = f"{selected_prefix}{icon} {summary['role_type']}  ·  {score}/100{demo_tag}"
+                if st.button(
+                    label,
+                    key=f"session-{summary['id']}",
+                    width="stretch",
+                    type="primary" if is_active else "secondary",
+                ):
                     st.session_state["active_session"] = api_get(
                         API_BASE_URL,
                         f"/sessions/{summary['id']}",
                         access_token,
                     )
+                    st.rerun()
         except requests.RequestException:
             st.caption("Start the FastAPI backend to load sessions.")
 
