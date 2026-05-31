@@ -148,17 +148,19 @@ class RAGQuestionBank:
 
         try:
             with get_connection() as conn:
-                conn.executemany(
-                    """
-                    INSERT INTO question_embeddings
-                        (session_id, question_text, answer_text, embedding, role_type, user_id)
-                    VALUES (%s, %s, %s, %s::vector, %s, %s)
-                    """,
-                    [
-                        (session_id, q.question, answer_map.get(q.question), json.dumps(emb), role_type, user_id)
-                        for q, emb in zip(questions, embeddings)
-                    ],
-                )
+                rows = [
+                    (session_id, q.question, answer_map.get(q.question), json.dumps(emb), role_type, user_id)
+                    for q, emb in zip(questions, embeddings)
+                ]
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        """
+                        INSERT INTO question_embeddings
+                            (session_id, question_text, answer_text, embedding, role_type, user_id)
+                        VALUES (%s, %s, %s, %s::vector, %s, %s)
+                        """,
+                        rows,
+                    )
         except Exception as exc:
             logger.warning("rag_store_insert_failed session_id=%d error=%s", session_id, exc)
             return 0

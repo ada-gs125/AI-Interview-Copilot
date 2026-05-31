@@ -56,6 +56,7 @@ def _db_failing(msg="db error"):
     conn = MagicMock()
     conn.execute.side_effect = Exception(msg)
     conn.executemany.side_effect = Exception(msg)
+    conn.cursor.side_effect = Exception(msg)
     yield conn
 
 
@@ -192,7 +193,9 @@ class TestStore:
         @contextmanager
         def capture_conn():
             conn = MagicMock()
-            conn.executemany.side_effect = lambda _sql, rows: batches.append(list(rows))
+            cursor = MagicMock()
+            cursor.executemany.side_effect = lambda _sql, rows: batches.append(list(rows))
+            conn.cursor.return_value.__enter__.return_value = cursor
             yield conn
 
         with patch("app.services.rag_service.get_connection", capture_conn):
@@ -215,7 +218,9 @@ class TestStore:
         @contextmanager
         def capture_conn():
             conn = MagicMock()
-            conn.executemany.side_effect = lambda _sql, rows: stored_rows.append(list(rows))
+            cursor = MagicMock()
+            cursor.executemany.side_effect = lambda _sql, rows: stored_rows.append(list(rows))
+            conn.cursor.return_value.__enter__.return_value = cursor
             yield conn
 
         with patch("app.services.rag_service.get_connection", capture_conn):
