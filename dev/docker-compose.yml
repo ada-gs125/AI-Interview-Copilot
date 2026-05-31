@@ -16,9 +16,11 @@ services:
       retries: 10
 
   backend:
-    build: .
+    build:
+      context: ..
+      dockerfile: Dockerfile
     env_file:
-      - .env
+      - ../.env
     environment:
       DATABASE_URL: postgresql://interview_copilot:interview_copilot@postgres:5432/interview_copilot
     ports:
