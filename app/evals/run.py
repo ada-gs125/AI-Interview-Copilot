@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from app.schemas import (
 )
 from app.services.ai_service import AIInterviewService
 from app.services.interview_workflow import _usage_summary
+from app.services.llm_skills import all_skill_specs
 from app.services.mock_service import MockAIInterviewService
 from app.services.prompts import PROMPT_VERSION
 
@@ -151,6 +153,7 @@ def run_evaluation(
             case_count=len(case_results),
             average_score=round(average_score, 4),
             prompt_version=PROMPT_VERSION,
+            skill_versions=[dataclasses.asdict(spec) for spec in all_skill_specs()],
             model=settings.openai_model if not use_mock_ai else "mock-ai",
             usage=usage,
         ),
@@ -177,10 +180,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     payload = report.model_dump(mode="json")
     rendered = json.dumps(payload, ensure_ascii=False, indent=2)
-    if args.output:
-        args.output.write_text(rendered + "\n", encoding="utf-8")
-    else:
-        print(rendered)
 
     if args.job_id:
         init_db()
@@ -188,6 +187,12 @@ def main(argv: list[str] | None = None) -> int:
         if not attached:
             print(f"Job not found: {args.job_id}", file=sys.stderr)
             return 2
+
+    if args.output:
+        args.output.write_text(rendered + "\n", encoding="utf-8")
+    else:
+        print(rendered)
+
     return 0
 
 

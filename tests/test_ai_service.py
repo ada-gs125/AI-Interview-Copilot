@@ -56,6 +56,24 @@ def test_estimated_cost_is_omitted_without_prices():
     assert service._estimated_cost_usd(100, 200) is None
 
 
+def test_run_skill_records_skill_name_in_usage():
+    service = object.__new__(AIInterviewService)
+    service.usage_events = []
+    service.model = "gpt-test"
+
+    class FakeUsage:
+        input_tokens = 10
+        output_tokens = 5
+        total_tokens = 15
+
+    service.input_cost_per_1m_tokens = 0.0
+    service.output_cost_per_1m_tokens = 0.0
+    service._record_usage(SimpleNamespace(usage=FakeUsage()), schema=type("DemoSchema", (), {}), skill_name="demo")
+
+    assert service.usage_events[0]["skill"] == "demo"
+    assert service.usage_events[0]["schema"] == "DemoSchema"
+
+
 def test_stream_answer_reads_openai_response_delta_events():
     class FakeStream:
         def __enter__(self):

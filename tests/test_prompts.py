@@ -4,12 +4,28 @@ from app.services.prompts import (
     generate_questions_prompt,
     jd_analysis_prompt,
 )
+from app.services.llm_skills import JD_ANALYSIS_SKILL, all_skill_specs
 
 from tests.factories import ENGLISH_JD, RESUME_TEXT, sample_jd_analysis, sample_resume_match
 
 
 def test_prompt_version_is_defined():
     assert PROMPT_VERSION
+
+
+def test_llm_skill_metadata_wraps_prompt_builder():
+    prompt = JD_ANALYSIS_SKILL.prompt(
+        job_description=ENGLISH_JD,
+        role_type="AI Engineer",
+        output_language="English",
+    )
+    specs = {spec.name: spec for spec in all_skill_specs()}
+
+    assert JD_ANALYSIS_SKILL.name == "jd_analysis"
+    assert JD_ANALYSIS_SKILL.version == PROMPT_VERSION
+    assert JD_ANALYSIS_SKILL.output_schema.__name__ == "JDAnalysis"
+    assert "jd_analysis" in specs
+    assert ENGLISH_JD in prompt.user
 
 
 def test_jd_prompt_contains_faithfulness_and_language_rules():

@@ -20,14 +20,15 @@ from app.schemas import (
     OutputLanguage,
     RoleType,
 )
-from app.services.prompts import (
-    generate_answer_prompt,
-    generate_answers_prompt,
-    generate_questions_prompt,
-    jd_analysis_prompt,
-    language_instruction,
-    resume_match_prompt,
+from app.services.llm_skills import (
+    ANSWER_GENERATION_SKILL,
+    ANSWER_STREAMING_SKILL,
+    JD_ANALYSIS_SKILL,
+    QUESTION_GENERATION_SKILL,
+    RESUME_MATCH_SKILL,
+    LLMSkill,
 )
+from app.services.llm_skills.interview import language_instruction
 
 
 class AIInterviewService:
@@ -49,29 +50,21 @@ class AIInterviewService:
         output_language: OutputLanguage = "Match job description language",
     ) -> JDAnalysis:
         # Extract hiring signals from the job description only.
-        prompt = jd_analysis_prompt(
+        return self._run_skill(
+            JD_ANALYSIS_SKILL,
             job_description=job_description,
             role_type=role_type,
             output_language=output_language,
         )
-        return self._parse(
-            JDAnalysis,
-            system=prompt.system,
-            user=prompt.user,
-        )
 
     def match_resume(self, request: ResumeMatchRequest) -> ResumeMatch:
         # Compare resume evidence against the job description without inventing facts.
-        prompt = resume_match_prompt(
+        return self._run_skill(
+            RESUME_MATCH_SKILL,
             resume_text=request.resume_text,
             job_description=request.job_description,
             role_type=request.role_type,
             output_language=request.output_language,
-        )
-        return self._parse(
-            ResumeMatch,
-            system=prompt.system,
-            user=prompt.user,
         )
 
     def generate_questions(
@@ -82,7 +75,8 @@ class AIInterviewService:
     ) -> QuestionSet:
         jd_context = request.jd_analysis.model_dump_json() if request.jd_analysis else "Not provided."
         match_context = request.resume_match.model_dump_json() if request.resume_match else "Not provided."
-        prompt = generate_questions_prompt(
+        return self._run_skill(
+            QUESTION_GENERATION_SKILL,
             resume_text=request.resume_text,
             job_description=request.job_description,
             role_type=request.role_type,
@@ -92,15 +86,10 @@ class AIInterviewService:
             few_shot_examples=few_shot_examples,
         )
 
-        return self._parse(
-            QuestionSet,
-            system=prompt.system,
-            user=prompt.user,
-        )
-
     def generate_answer(self, request: GenerateAnswerRequest) -> AnswerResult:
         # Generate one grounded answer for a selected interview question.
-        prompt = generate_answer_prompt(
+        return self._run_skill(
+            ANSWER_STREAMING_SKILL,
             resume_text=request.resume_text,
             job_description=request.job_description,
             role_type=request.role_type,
@@ -109,15 +98,10 @@ class AIInterviewService:
             category=request.category,
             structured=True,
         )
-        return self._parse(
-            AnswerResult,
-            system=prompt.system,
-            user=prompt.user,
-        )
 
     def stream_answer(self, request: GenerateAnswerRequest) -> Iterator[str]:
         # Used by the frontend regenerate button for live token streaming.
-        prompt = generate_answer_prompt(
+        prompt = ANSWER_STREAMING_SKILL.prompt(
             resume_text=request.resume_text,
             job_description=request.job_description,
             role_type=request.role_type,
@@ -152,7 +136,8 @@ class AIInterviewService:
     ) -> AnswerSet:
         # Batch answers preserve each generated question and category.
         category_labels = self._answer_category_labels(output_language, job_description)
-        prompt = generate_answers_prompt(
+        return self._run_skill(
+            ANSWER_GENERATION_SKILL,
             resume_text=resume_text,
             job_description=job_description,
             role_type=role_type,
@@ -161,19 +146,17 @@ class AIInterviewService:
             category_labels=category_labels,
         )
 
-        return self._parse(
-            AnswerSet,
-            system=prompt.system,
-            user=prompt.user,
-        )
+    def _run_skill(self, skill: LLMSkill, **kwargs: Any):
+        prompt = skill.prompt(**kwargs)
+        return self._parse(skill.output_schema, system=prompt.system, user=prompt.user, skill_name=skill.name)
 
-    def _parse(self, schema: type, *, system: str, user: str):
+    def _parse(self, schema: type, *, system: str, user: str, skill_name: str | None = None):
         # Structured outputs keep downstream code from parsing raw JSON manually.
         response = self._call_api(schema, system=system, user=user)
         parsed = response.output_parsed
         if parsed is None:
             raise RuntimeError("The model did not return a parseable structured response.")
-        self._record_usage(response, schema)
+        self._record_usage(response, schema, skill_name=skill_name)
         return parsed
 
     @retry(
@@ -195,13 +178,15 @@ class AIInterviewService:
     def usage_snapshot(self) -> list[dict[str, Any]]:
         return list(getattr(self, "usage_events", []))
 
-    def _record_usage(self, response: Any, schema: type) -> None:
+    def _record_usage(self, response: Any, schema: type, *, skill_name: str | None = None) -> None:
         # Store per-call token usage so the job progress UI can show totals.
         usage = getattr(response, "usage", None)
         event: dict[str, Any] = {
             "schema": schema.__name__,
             "model": self.model,
         }
+        if skill_name is not None:
+            event["skill"] = skill_name
         if usage is not None:
             input_tokens = getattr(usage, "input_tokens", None)
             output_tokens = getattr(usage, "output_tokens", None)
@@ -220,6 +205,7 @@ class AIInterviewService:
     def _estimated_cost_usd(self, input_tokens: Any, output_tokens: Any) -> float | None:
         if not isinstance(input_tokens, int) or not isinstance(output_tokens, int):
             return None
+        # 0.0 is the sentinel for "not configured" (Settings default); skip estimation in that case.
         if not self.input_cost_per_1m_tokens and not self.output_cost_per_1m_tokens:
             return None
         return round(

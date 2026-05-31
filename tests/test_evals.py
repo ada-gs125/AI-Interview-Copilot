@@ -68,6 +68,7 @@ def test_eval_runner_loads_dataset_and_runs_with_mock_ai():
     assert report.summary.case_count == 1
     assert report.summary.model == "mock-ai"
     assert report.summary.prompt_version
+    assert any(skill["name"] == "jd_analysis" for skill in report.summary.skill_versions)
     assert report.cases[0].session is not None
 
 

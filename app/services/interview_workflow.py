@@ -395,6 +395,8 @@ class InterviewWorkflowRunner:
         # Reuse the existing OpenAI client rather than creating a second HTTP connection pool.
         client = self.ai.client if isinstance(self.ai, AIInterviewService) else OpenAI(api_key=get_settings().openai_api_key)
         rag = RAGQuestionBank(client)
+        
+        # role_type + JD analysis 里前 10 个 required_technical_skills去搜索
         skills = [s.name for s in jd_analysis.required_technical_skills[:10]]
         examples = rag.retrieve_similar(self.role_type, skills, user_id=self.user_id)
         if examples:

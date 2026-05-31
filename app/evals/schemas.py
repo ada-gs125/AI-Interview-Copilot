@@ -50,6 +50,7 @@ class EvalSummary(BaseModel):
     case_count: int
     average_score: float = Field(ge=0.0, le=1.0)
     prompt_version: str
+    skill_versions: list[dict[str, str]] = Field(default_factory=list)
     model: str
     usage: dict[str, Any] = Field(default_factory=dict)
 
