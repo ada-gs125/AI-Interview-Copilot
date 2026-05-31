@@ -223,3 +223,8 @@ __marimo__/
 
 # Claude
 CLAUDE.md
+
+# MacOS
+.DS_Store
+.vscode/
+.omc/

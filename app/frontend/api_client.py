@@ -85,32 +85,6 @@ def create_session_job(
     return response.json()
 
 
-def create_session_from_upload(
-    api_base_url: str,
-    resume_file,
-    job_description: str,
-    role_type: str,
-    output_language: str,
-    demo_mode: bool,
-    access_token: str | None = None,
-) -> dict[str, Any]:
-    files, data = _upload_payload(
-        resume_file,
-        job_description,
-        role_type,
-        output_language,
-        demo_mode,
-    )
-    response = requests.post(
-        f"{api_base_url}/sessions/from-upload",
-        files=files,
-        data=data,
-        headers=auth_headers(access_token),
-        timeout=240,
-    )
-    response.raise_for_status()
-    return response.json()
-
 
 def get_session_job(api_base_url: str, status_url: str, access_token: str | None = None) -> dict[str, Any]:
     return api_get(api_base_url, status_url, access_token)
@@ -135,9 +109,6 @@ def stream_answer(
             if line.startswith(b"data: "):
                 yield json.loads(line[6:])
 
-
-def should_fallback_to_sync(exc: requests.HTTPError) -> bool:
-    return exc.response is not None and exc.response.status_code in {404, 405}
 
 
 def friendly_api_error(exc: requests.HTTPError) -> tuple[str, str | None]:

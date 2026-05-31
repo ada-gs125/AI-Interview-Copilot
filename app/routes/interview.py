@@ -26,8 +26,6 @@ from app.database import (
 )
 from app.dependencies import current_user
 from app.schemas import (
-    AnalyzeJDRequest,
-    AnswerResult,
     AnswerSet,
     GenerateAnswerRequest,
     GenerateQuestionsRequest,
@@ -170,59 +168,6 @@ def _mark_failed_step(steps: list[dict[str, Any]], message: str) -> list[dict[st
         )
     return steps
 
-
-def _run_session_workflow(
-    *,
-    user_id: int,
-    resume_pdf_bytes: bytes,
-    job_description: str,
-    role_type: RoleType,
-    output_language: OutputLanguage,
-    demo_mode: bool,
-) -> SessionResponse:
-    effective_demo_mode = _effective_demo_mode(demo_mode)
-    resume_text = extract_resume_text(resume_pdf_bytes)
-    ai = _ai_service(effective_demo_mode)
-    jd_analysis = ai.analyze_jd(job_description, role_type, output_language)
-    resume_match = ai.match_resume(
-        ResumeMatchRequest(
-            resume_text=resume_text,
-            job_description=job_description,
-            role_type=role_type,
-            output_language=output_language,
-            demo_mode=effective_demo_mode,
-        )
-    )
-    questions = ai.generate_questions(
-        GenerateQuestionsRequest(
-            resume_text=resume_text,
-            job_description=job_description,
-            role_type=role_type,
-            output_language=output_language,
-            demo_mode=effective_demo_mode,
-            jd_analysis=jd_analysis,
-            resume_match=resume_match,
-        )
-    )
-    answers = ai.generate_answers_for_question_set(
-        resume_text=resume_text,
-        job_description=job_description,
-        role_type=role_type,
-        output_language=output_language,
-        questions=questions,
-    )
-    return _persist_or_preview_session(
-        effective_demo_mode=effective_demo_mode,
-        user_id=user_id,
-        role_type=role_type,
-        output_language=output_language,
-        job_description=job_description,
-        resume_text=resume_text,
-        jd_analysis=jd_analysis,
-        resume_match=resume_match,
-        questions=questions,
-        answers=answers,
-    )
 
 
 def _persist_or_preview_session(
@@ -370,8 +315,20 @@ def _run_session_job(
         with ThreadPoolExecutor(max_workers=2) as executor:
             jd_future = executor.submit(_do_analyze_jd)
             match_future = executor.submit(_do_match_resume)
-            jd_exc = jd_future.exception()
-            match_exc = match_future.exception()
+
+        try:
+            jd_analysis, jd_latency = jd_future.result(timeout=120)
+            jd_exc = None
+        except Exception as e:
+            jd_exc = e
+            jd_analysis, jd_latency = None, 0
+
+        try:
+            resume_match, match_latency = match_future.result(timeout=120)
+            match_exc = None
+        except Exception as e:
+            match_exc = e
+            resume_match, match_latency = None, 0
 
         if jd_exc or match_exc:
             analyze_step.update({
@@ -385,9 +342,6 @@ def _run_session_job(
                 **({} if not match_exc else {"error_message": str(match_exc)}),
             })
             raise (jd_exc or match_exc)
-
-        jd_analysis, jd_latency = jd_future.result()
-        resume_match, match_latency = match_future.result()
 
         jd_usage = _usage_events(ai_jd)
         match_usage = _usage_events(ai_match)
@@ -500,66 +454,6 @@ def _run_session_job(
         logger.warning("job_failed", extra={"job_id": job_id, "user_id": user_id, "error_code": detail["code"]})
 
 
-@router.post("/analyze-jd", response_model=JDAnalysis)
-def analyze_jd(request: AnalyzeJDRequest, user: UserResponse = Depends(current_user)) -> JDAnalysis:
-    try:
-        effective_demo_mode = _effective_demo_mode(request.demo_mode)
-        return _ai_service(effective_demo_mode).analyze_jd(
-            request.job_description,
-            request.role_type,
-            request.output_language,
-        )
-    except Exception as exc:
-        _raise_ai_error(exc)
-
-
-@router.post("/match-resume", response_model=ResumeMatch)
-def match_resume(
-    resume_pdf: UploadFile = File(...),
-    job_description: str = Form(...),
-    role_type: RoleType = Form(...),
-    output_language: OutputLanguage = Form("Match job description language"),
-    demo_mode: bool = Form(False),
-    user: UserResponse = Depends(current_user),
-) -> ResumeMatch:
-    try:
-        effective_demo_mode = _effective_demo_mode(demo_mode)
-        resume_text = extract_resume_text(resume_pdf.file.read())
-        return _ai_service(effective_demo_mode).match_resume(
-            ResumeMatchRequest(
-                resume_text=resume_text,
-                job_description=job_description,
-                role_type=role_type,
-                output_language=output_language,
-                demo_mode=effective_demo_mode,
-            )
-        )
-    except ValueError as exc:
-        _raise_pdf_error(exc)
-    except Exception as exc:
-        _raise_ai_error(exc)
-
-
-@router.post("/generate-questions", response_model=QuestionSet)
-def generate_questions(request: GenerateQuestionsRequest, user: UserResponse = Depends(current_user)) -> QuestionSet:
-    try:
-        effective_demo_mode = _effective_demo_mode(request.demo_mode)
-        request.demo_mode = effective_demo_mode
-        return _ai_service(effective_demo_mode).generate_questions(request)
-    except Exception as exc:
-        _raise_ai_error(exc)
-
-
-@router.post("/generate-answer", response_model=AnswerResult)
-def generate_answer(request: GenerateAnswerRequest, user: UserResponse = Depends(current_user)) -> AnswerResult:
-    try:
-        effective_demo_mode = _effective_demo_mode(request.demo_mode)
-        request.demo_mode = effective_demo_mode
-        return _ai_service(effective_demo_mode).generate_answer(request)
-    except Exception as exc:
-        _raise_ai_error(exc)
-
-
 @router.post("/generate-answer/stream")
 def generate_answer_stream(
     request: GenerateAnswerRequest,
@@ -578,30 +472,6 @@ def generate_answer_stream(
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-@router.post("/sessions/from-upload", response_model=SessionResponse)
-def create_session_from_upload(
-    resume_pdf: UploadFile = File(...),
-    job_description: str = Form(...),
-    role_type: RoleType = Form(...),
-    output_language: OutputLanguage = Form("Match job description language"),
-    demo_mode: bool = Form(False),
-    user: UserResponse = Depends(current_user),
-) -> SessionResponse:
-    try:
-        return _run_session_workflow(
-            user_id=user.id,
-            resume_pdf_bytes=resume_pdf.file.read(),
-            job_description=job_description,
-            role_type=role_type,
-            output_language=output_language,
-            demo_mode=demo_mode,
-        )
-    except ValueError as exc:
-        _raise_pdf_error(exc)
-    except Exception as exc:
-        _raise_ai_error(exc)
 
 
 @router.post(
