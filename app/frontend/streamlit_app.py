@@ -75,6 +75,17 @@ STEP_LABELS = {
 }
 
 
+def optional_number(value: Any) -> int | float | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 st.set_page_config(
     page_title="AI Interview Copilot",
     layout="wide",
@@ -302,14 +313,14 @@ def show_job_progress(job: dict[str, Any]) -> None:
                 {
                     "Step": STEP_LABELS.get(step.get("name", ""), step.get("name", "")),
                     "Status": step.get("status", ""),
-                    "Latency ms": step.get("latency_ms") or "",
-                    "Calls": step.get("usage", {}).get("call_count", 0),
-                    "Tokens": step.get("usage", {}).get("total_tokens", ""),
-                    "Cost USD": step.get("usage", {}).get("estimated_cost_usd", ""),
+                    "Latency ms": optional_number(step.get("latency_ms")),
+                    "Calls": optional_number((step.get("usage") or {}).get("call_count")),
+                    "Tokens": optional_number((step.get("usage") or {}).get("total_tokens")),
+                    "Cost USD": optional_number((step.get("usage") or {}).get("estimated_cost_usd")),
                 }
                 for step in steps
             ],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -355,7 +366,7 @@ def show_skill_list(title: str, items: list[dict[str, Any]]) -> None:
             }
             for item in items
         ],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -389,7 +400,7 @@ def show_session(session: dict[str, Any]) -> None:
             data=build_markdown_report(session),
             file_name=report_filename(session),
             mime="text/markdown",
-            use_container_width=True,
+            width="stretch",
             help="Download Markdown report",
         )
     with pdf_col:
@@ -398,12 +409,12 @@ def show_session(session: dict[str, Any]) -> None:
             data=build_pdf_report(session),
             file_name=pdf_filename(session),
             mime="application/pdf",
-            use_container_width=True,
+            width="stretch",
             help="Download PDF report",
         )
 
     if session.get("id"):
-        if st.button("Delete session", use_container_width=False):
+        if st.button("Delete session", width="content"):
             try:
                 api_delete(API_BASE_URL, f"/sessions/{session['id']}", st.session_state.get("access_token"))
                 st.session_state.pop("active_session", None)
@@ -452,7 +463,7 @@ def show_session(session: dict[str, Any]) -> None:
 
     with tabs[2]:
         st.subheader("Strong and partial matches")
-        st.dataframe(resume_match["strong_matches"], use_container_width=True, hide_index=True)
+        st.dataframe(resume_match["strong_matches"], width="stretch", hide_index=True)
         st.subheader("Missing skills")
         for item in resume_match["missing_skills"]:
             st.markdown(f"- {item}")
@@ -534,7 +545,7 @@ with st.sidebar:
             """,
             unsafe_allow_html=True,
         )
-        if st.button("Sign out", use_container_width=True):
+        if st.button("Sign out", width="stretch"):
             for key in ("access_token", "current_user", "active_session", "active_job"):
                 st.session_state.pop(key, None)
             st.rerun()
@@ -566,7 +577,7 @@ with st.sidebar:
                 score = summary["overall_fit_score"]
                 demo_tag = " · demo" if summary.get("demo_mode") else ""
                 label = f"{icon} {summary['role_type']}  ·  {score}/100{demo_tag}"
-                if st.button(label, key=f"session-{summary['id']}", use_container_width=True):
+                if st.button(label, key=f"session-{summary['id']}", width="stretch"):
                     st.session_state["active_session"] = api_get(
                         API_BASE_URL,
                         f"/sessions/{summary['id']}",
@@ -606,7 +617,7 @@ if not access_token:
             with st.form("login_form"):
                 login_email = st.text_input("Email")
                 login_password = st.text_input("Password", type="password")
-                if st.form_submit_button("Sign in", use_container_width=True, type="primary"):
+                if st.form_submit_button("Sign in", width="stretch", type="primary"):
                     if not login_email or not login_password:
                         st.error("Email and password are required.")
                     else:
@@ -623,7 +634,7 @@ if not access_token:
                 reg_email = st.text_input("Email")
                 reg_password = st.text_input("Password", type="password", help="Minimum 8 characters")
                 reg_confirm = st.text_input("Confirm password", type="password")
-                if st.form_submit_button("Create account", use_container_width=True, type="primary"):
+                if st.form_submit_button("Create account", width="stretch", type="primary"):
                     if not reg_email or not reg_password:
                         st.error("Email and password are required.")
                     elif len(reg_password) < 8:
@@ -646,7 +657,7 @@ left, right = st.columns([1.42, 0.58], gap="large")
 with left:
     resume_file = st.file_uploader("Resume PDF", type=["pdf"])
     job_description = st.text_area("Target job description", height=320)
-    run = st.button("Generate prep session", type="primary", use_container_width=True)
+    run = st.button("Generate prep session", type="primary", width="stretch")
 
 with right:
     st.markdown(
