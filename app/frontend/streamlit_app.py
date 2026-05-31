@@ -10,6 +10,10 @@ import requests
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from app.services.report_export import (
     build_markdown_report,
     build_pdf_report,
@@ -26,11 +30,6 @@ from app.frontend.api_client import (
     register_user,
     stream_answer,
 )
-
-
-ROOT_DIR = Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 
 DEFAULT_API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
