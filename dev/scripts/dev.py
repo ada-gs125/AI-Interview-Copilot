@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def start_process(name: str, command: list[str], env: dict[str, str]) -> subprocess.Popen:
@@ -102,4 +102,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

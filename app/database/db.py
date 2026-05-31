@@ -382,6 +382,28 @@ def _row_to_job(row: DictRow) -> SessionJobResponse:
     )
 
 
+def cleanup_orphan_jobs() -> None:
+    """Mark jobs stuck in queued/running for > 15 min as failed (e.g. after server restart)."""
+    if _pool is None:
+        return
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE session_jobs
+            SET status = 'failed',
+                completed_at = NOW(),
+                updated_at = NOW(),
+                error = %s
+            WHERE status IN ('queued', 'running') AND updated_at < %s
+            """,
+            (
+                Jsonb({"message": "Job timed out or server restarted.", "action": "Please retry.", "code": "job_timeout"}),
+                cutoff,
+            ),
+        )
+
+
 def get_session_job(job_id: str, *, user_id: int) -> Optional[SessionJobResponse]:
     with get_connection() as conn:
         row = conn.execute(

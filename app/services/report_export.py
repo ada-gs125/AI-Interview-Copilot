@@ -1,3 +1,5 @@
+"""Markdown and PDF report builders for generated interview sessions."""
+
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 
 def _bullet_list(items: list[str]) -> str:
+    # Keep empty sections explicit in exported reports.
     if not items:
         return "- None"
     return "\n".join(f"- {item}" for item in items)
@@ -35,6 +38,7 @@ def _question_section(title: str, items: list[dict[str, Any]]) -> str:
 
 
 def build_markdown_report(session: dict[str, Any]) -> str:
+    # Frontend download path uses this as the source format and PDF input.
     jd_analysis = session["jd_analysis"]
     resume_match = session["resume_match"]
     questions = session["questions"]
@@ -146,6 +150,7 @@ def pdf_filename(session: dict[str, Any]) -> str:
 
 
 def build_pdf_report(session: dict[str, Any]) -> bytes:
+    # Render the markdown-like report into a simple ReportLab document.
     markdown = build_markdown_report(session)
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -230,6 +235,7 @@ def build_pdf_report(session: dict[str, Any]) -> bytes:
 
 
 def _register_report_font() -> str:
+    # Prefer CJK-capable fonts so Chinese reports render correctly.
     for path in (
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
         "/System/Library/Fonts/STHeiti Medium.ttc",

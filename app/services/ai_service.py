@@ -1,3 +1,5 @@
+"""OpenAI-backed interview analysis and answer generation service."""
+
 from __future__ import annotations
 
 import json
@@ -22,6 +24,8 @@ from app.schemas import (
 
 
 class AIInterviewService:
+    """Calls OpenAI Responses API and returns validated Pydantic models."""
+
     def __init__(self, settings: Settings) -> None:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured. Add it to .env before running AI workflows.")
@@ -37,6 +41,7 @@ class AIInterviewService:
         role_type: RoleType,
         output_language: OutputLanguage = "Match job description language",
     ) -> JDAnalysis:
+        # Extract hiring signals from the job description only.
         return self._parse(
             JDAnalysis,
             system=(
@@ -49,6 +54,7 @@ class AIInterviewService:
         )
 
     def match_resume(self, request: ResumeMatchRequest) -> ResumeMatch:
+        # Compare resume evidence against the job description without inventing facts.
         return self._parse(
             ResumeMatch,
             system=(
@@ -64,9 +70,29 @@ class AIInterviewService:
             ),
         )
 
-    def generate_questions(self, request: GenerateQuestionsRequest) -> QuestionSet:
+    def generate_questions(
+        self,
+        request: GenerateQuestionsRequest,
+        *,
+        few_shot_examples: list[dict] | None = None,
+    ) -> QuestionSet:
         jd_context = request.jd_analysis.model_dump_json() if request.jd_analysis else "Not provided."
         match_context = request.resume_match.model_dump_json() if request.resume_match else "Not provided."
+
+        # Optional RAG examples calibrate style and difficulty, but should not be copied.
+        few_shot_text = ""
+        if few_shot_examples:
+            lines = [
+                f"- {ex.get('question', '')}"
+                + (f" → {ex['answer'][:200]}" if ex.get("answer") else "")
+                for ex in few_shot_examples
+            ]
+            few_shot_text = (
+                "\n\nHigh-relevance questions from similar past sessions "
+                "(use as calibration reference for tone, specificity, and difficulty "
+                "— do not copy verbatim):\n" + "\n".join(lines)
+            )
+
         return self._parse(
             QuestionSet,
             system=(
@@ -81,10 +107,12 @@ class AIInterviewService:
                 f"Job description:\n{request.job_description}\n\n"
                 f"JD analysis JSON:\n{jd_context}\n\n"
                 f"Resume match JSON:\n{match_context}"
+                f"{few_shot_text}"
             ),
         )
 
     def generate_answer(self, request: GenerateAnswerRequest) -> AnswerResult:
+        # Generate one grounded answer for a selected interview question.
         language_instruction = self._language_instruction(
             request.output_language,
             fallback_language_source="question",
@@ -112,6 +140,7 @@ class AIInterviewService:
         )
 
     def stream_answer(self, request: GenerateAnswerRequest) -> Iterator[str]:
+        # Used by the frontend regenerate button for live token streaming.
         language_instruction = self._language_instruction(
             request.output_language,
             fallback_language_source="question",
@@ -157,6 +186,7 @@ class AIInterviewService:
         output_language: OutputLanguage,
         questions: QuestionSet,
     ) -> AnswerSet:
+        # Batch answers preserve each generated question and category.
         category_labels = self._answer_category_labels(output_language, job_description)
         flattened: list[dict[str, str]] = []
         for category, items in (
@@ -186,6 +216,7 @@ class AIInterviewService:
         )
 
     def _parse(self, schema: type, *, system: str, user: str):
+        # Structured outputs keep downstream code from parsing raw JSON manually.
         response = self._call_api(schema, system=system, user=user)
         parsed = response.output_parsed
         if parsed is None:
@@ -199,6 +230,7 @@ class AIInterviewService:
         reraise=True,
     )
     def _call_api(self, schema: type, *, system: str, user: str):
+        # Retry transient model/API failures with bounded exponential backoff.
         return self.client.responses.parse(
             model=self.model,
             input=[
@@ -212,6 +244,7 @@ class AIInterviewService:
         return list(getattr(self, "usage_events", []))
 
     def _record_usage(self, response: Any, schema: type) -> None:
+        # Store per-call token usage so the job progress UI can show totals.
         usage = getattr(response, "usage", None)
         event: dict[str, Any] = {
             "schema": schema.__name__,

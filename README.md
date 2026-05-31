@@ -83,6 +83,8 @@ If `OPENAI_API_KEY` is absent, the app falls back to demo mode automatically.
 
 ## Run Locally
 
+Local development helpers live under `dev/`; the root `Makefile` keeps the usual commands as shortcuts.
+
 ```bash
 make db       # start PostgreSQL in Docker
 make dev      # backend (port 8000) + frontend (port 8501) together
@@ -137,7 +139,7 @@ Response: `text/event-stream`. Each line is `data: <json-encoded token>`. Termin
 ## Docker
 
 ```bash
-docker compose up --build   # PostgreSQL + backend
+docker compose -f dev/docker-compose.yml up --build   # PostgreSQL + backend
 ```
 
 Run Streamlit separately:

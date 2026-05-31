@@ -102,6 +102,7 @@ def test_generate_answer_stream_returns_sse_tokens(monkeypatch):
 @pytest.fixture
 def fake_session_job_store(monkeypatch):
     import app.routes.interview as interview_routes
+    import app.services.interview_workflow as interview_workflow
 
     jobs = {}
 
@@ -140,16 +141,16 @@ def fake_session_job_store(monkeypatch):
         return SessionJobResponse.model_validate(job)
 
     monkeypatch.setattr(interview_routes, "create_session_job", fake_create)
-    monkeypatch.setattr(interview_routes, "update_session_job", fake_update)
+    monkeypatch.setattr(interview_workflow, "update_session_job", fake_update)
     monkeypatch.setattr(interview_routes, "get_session_job", fake_get)
 
     return jobs
 
 
 def test_create_session_job_runs_background_workflow_and_returns_status(monkeypatch, fake_session_job_store):
-    import app.routes.interview as interview_routes
+    import app.services.interview_workflow as interview_workflow
 
-    monkeypatch.setattr(interview_routes, "extract_resume_text", lambda _: RESUME_TEXT)
+    monkeypatch.setattr(interview_workflow, "extract_resume_text", lambda _: RESUME_TEXT)
 
     with _client_without_startup_db(monkeypatch) as client:
         create_response = client.post(
@@ -304,9 +305,9 @@ def test_register_rejects_duplicate_email(monkeypatch):
 
 
 def test_session_job_is_scoped_to_owner(monkeypatch, fake_session_job_store):
-    import app.routes.interview as interview_routes
+    import app.services.interview_workflow as interview_workflow
 
-    monkeypatch.setattr(interview_routes, "extract_resume_text", lambda _: RESUME_TEXT)
+    monkeypatch.setattr(interview_workflow, "extract_resume_text", lambda _: RESUME_TEXT)
 
     with _client_without_startup_db(monkeypatch, user_id=1) as client:
         create_response = client.post(
