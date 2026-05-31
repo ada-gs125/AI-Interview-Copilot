@@ -175,7 +175,13 @@ class AIInterviewService:
                 },
             ],
         ) as stream:
-            yield from stream.text_deltas
+            if hasattr(stream, "text_deltas"):
+                yield from stream.text_deltas
+                return
+
+            for event in stream:
+                if getattr(event, "type", None) == "response.output_text.delta":
+                    yield event.delta
 
     def generate_answers_for_question_set(
         self,

@@ -501,7 +501,10 @@ def show_session(session: dict[str, Any]) -> None:
                         )
                         st.session_state[regen_result_key] = result
                     except requests.RequestException as exc:
-                        st.error(f"Could not reach backend: {exc}")
+                        message, action = friendly_api_error(exc)
+                        st.error(message)
+                        if action:
+                            st.info(action)
                 else:
                     st.write(st.session_state.get(regen_result_key, answer["concise_answer"]))
 

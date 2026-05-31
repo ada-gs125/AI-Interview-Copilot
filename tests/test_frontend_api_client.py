@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
 import requests
 
 from app.frontend import api_client
@@ -16,13 +17,30 @@ class DummyResumeFile:
 
 
 class DummyResponse:
-    def __init__(self, payload=None, *, status_code: int = 200, text: str = "") -> None:
+    def __init__(
+        self,
+        payload=None,
+        *,
+        status_code: int = 200,
+        text: str = "",
+        lines: list[bytes] | None = None,
+    ) -> None:
         self.payload = payload or {}
         self.status_code = status_code
         self.text = text
+        self.lines = lines or []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
 
     def json(self):
         return self.payload
+
+    def iter_lines(self):
+        return iter(self.lines)
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -119,6 +137,47 @@ def test_api_get_sends_auth_header(monkeypatch):
 
     assert payload == {"id": 42, "role_type": "AI Engineer"}
     assert calls == [("https://api.example.test/sessions/42", {"Authorization": "Bearer token-123"}, 30)]
+
+
+def test_stream_answer_yields_sse_tokens(monkeypatch):
+    def fake_post(url, *, json, headers, stream, timeout):
+        assert url == "https://api.example.test/generate-answer/stream"
+        assert json["question"] == "How do you design reliable APIs?"
+        assert headers == {"Authorization": "Bearer token-123"}
+        assert stream is True
+        assert timeout == 60
+        return DummyResponse(lines=[b'data: "hello"', b'data: " world"', b"data: [DONE]"])
+
+    monkeypatch.setattr(api_client.requests, "post", fake_post)
+
+    tokens = list(
+        api_client.stream_answer(
+            "https://api.example.test",
+            {"question": "How do you design reliable APIs?"},
+            "token-123",
+        )
+    )
+
+    assert tokens == ["hello", " world"]
+
+
+def test_stream_answer_raises_friendly_error_for_sse_error(monkeypatch):
+    def fake_post(url, *, json, headers, stream, timeout):
+        return DummyResponse(
+            lines=[
+                b"event: error",
+                b'data: {"message": "The AI workflow failed before completion.", "action": "Retry once.", "code": "ai_workflow_error"}',
+            ]
+        )
+
+    monkeypatch.setattr(api_client.requests, "post", fake_post)
+
+    with pytest.raises(requests.HTTPError) as exc_info:
+        list(api_client.stream_answer("https://api.example.test", {"question": "Q"}, "token-123"))
+
+    message, action = api_client.friendly_api_error(exc_info.value)
+    assert message == "The AI workflow failed before completion."
+    assert action == "Retry once."
 
 
 def test_friendly_api_error_extracts_structured_detail():

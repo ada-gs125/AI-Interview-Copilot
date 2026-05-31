@@ -103,11 +103,27 @@ def stream_answer(
         timeout=60,
     ) as response:
         response.raise_for_status()
+        event_name = "message"
         for line in response.iter_lines():
-            if not line or line == b"data: [DONE]":
-                break
+            if not line:
+                event_name = "message"
+                continue
+            if line.startswith(b"event: "):
+                event_name = line[7:].decode("utf-8")
+                continue
             if line.startswith(b"data: "):
-                yield json.loads(line[6:])
+                if line == b"data: [DONE]":
+                    break
+                payload = json.loads(line[6:])
+                if event_name == "error":
+                    error_response = requests.Response()
+                    error_response.status_code = 502
+                    error_response._content = json.dumps({"detail": payload}).encode("utf-8")
+                    error = requests.HTTPError(payload.get("message", "The stream failed."))
+                    error.response = error_response
+                    raise error
+                yield payload
+                event_name = "message"
 
 
 
